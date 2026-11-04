@@ -1,0 +1,47 @@
+BodyHook = the mod loader for NBA 2K14
+======================================
+INSTALL ONCE
+  nba2k14.exe folder:
+    dinput8.dll        BodyHook (also loads every mod)
+    BodyHook.ini
+    scripts\           mods go here, each in its own folder if you like:
+      scripts\SigExt\SigExt.asi + SigExt.ini
+      scripts\CrowdTune\CrowdTune.asi + CrowdTune.ini
+      scripts\<NewMod>\NewMod.asi + its files      (or straight into scripts\)
+  Logs (BodyHook.log, SigExt.log, CrowdTune.log ...) are written next to nba2k14.exe.
+  SigExt / CrowdTune read their .ini next to their .asi; if there is none there they still use
+  the one next to nba2k14.exe (older setups).
+
+DO I UPDATE BODYHOOK FOR NEW MODS?
+  No. Any .asi mod works as long as BodyHook (1.19.1 or newer, or 1.11.12-ML) is installed: drop the .asi into
+  scripts\ and start the game. Mods and BodyHook update independently - a new SigExt or CrowdTune
+  is just a new .asi file; a new BodyHook doesn't need new mods.
+
+WHERE BODYHOOK LOOKS FOR MODS
+  the game folder, scripts\, plugins\, asi\ and their subfolders (2 levels) - each .asi file
+  name once, loaded right before the
+  game's own code starts. BodyHook.log lists them ("mods: loaded scripts\CrowdTune.asi").
+
+OTHER MODS
+  - An .asi mod: into scripts\.
+  - A mod that ships its own ASI loader (as dinput8.dll): don't install that loader - put its .asi
+    files into scripts\ instead. If it HAS to be a dinput8.dll of its own (it's more than a loader):
+    rename it to dinput8_next.dll - BodyHook passes everything on to it.
+  - A mod with its own loader under another name (winmm.dll, version.dll ...): fine to keep; both
+    loaders read scripts\, and only one of them loads the mods.
+  - A mod that only comes as dinput8.dll and is not a loader (NBA 2K12: Blaze Shot Meter 12):
+    rename it to dinput8_next.dll (its own folder stays where its readme says), or put it into
+    scripts\ (or scripts\<Mod>\) - BodyHook loads it before the game starts either way (1.11.21-ML).
+  - Mods using other DLL names (d3d9.dll for ReShade/ENB, dxgi.dll ...): nothing to do.
+
+NBA 2K12 EXES (1.11.21-ML)
+  4F219A21 1.0x patch (RLD), 4E63057D 1.0 original (any name, e.g. "NBA 2K25 REMASTERED.exe"),
+  4E84D35F 1.0 SecuROM retail. BodyHook.log line "NBA 2K12 detected (exe TimeDateStamp ...)" says which.
+
+WHAT AN .ASI MOD NEEDS
+  Nothing from BodyHook - an .asi is a normal Windows DLL that starts itself when loaded. That is
+  why any .asi works with any ASI loader, BodyHook included. (Mods that depend on a specific other
+  mod say so in their own readme.)
+
+SIGASSIGNER
+  It writes a SigExt.ini: put it where your SigExt.ini is (scripts\SigExt\ with this setup).

@@ -1,0 +1,251 @@
+===============================================================================
+  BodyHook CHEAT SHEET  -  custom content inside pngXXXX.iff
+===============================================================================
+
+BASICS
+------
+  pngXXXX.iff  = a player's cyberface file. XXXX = his CFID in the roster.
+  Everything below goes INSIDE that file, as extra rows.
+  Only that player uses it. Everyone else is unaffected.
+
+  FileIDs are written the way RED MC shows them (4 bytes, left to right).
+  In a hex editor they appear reversed. Ignore that; use RED MC's form.
+
+
+GENERAL STEPS (RED MC)
+----------------------
+  1. Open  pngXXXX.iff  in RED MC.
+  2. Clone an existing row of the RIGHT TYPE:
+        SCNE row  -> for bodies, jerseys, shorts
+        TXTR row  -> for leg tattoos and accessory textures
+  3. Import your file into the cloned row:
+        body / jersey / shorts  -> import the model (.rmce)
+        leg tattoo / accessory  -> import the texture (.dds)
+  4. Set the row's FileID to one from the tables below.
+  5. Save, put the png in the game folder, done.
+  6. (Optional) check it:  python tools\iff_tool.py info pngXXXX.iff
+
+
+1) BODY   (row type: SCNE)
+-------------------------
+  Name               FileID
+  hi_body_skinny     53 7B A6 7B
+  hi_body            4A 61 0F DA
+  hi_body_fat        7D A4 74 11
+  hi_body_muscular   E9 B2 3D 51
+
+  * Use any one of them. The player gets that body whatever his roster
+    bodytype is.
+  * Start from the matching RMCE export of the stock body.
+
+
+2) LEG TATTOOS   (row type: TXTR)
+--------------------------------
+  Name               FileID
+  legs_00_color      92 B4 FE 41
+  legs_01_color      34 C3 F5 F5
+  legs_02_color      05 2B EF 68
+  legs_03_color      A3 5C E4 DC
+  legs_04_color      66 FB DA 52
+  legs_05_color      C0 8C D1 E6
+
+  * One row is enough. The number doesn't matter; the player uses
+    whichever legs_XX row his png has.
+
+
+3) JERSEYS   (row type: SCNE)
+----------------------------
+  Size is picked from the roster bodytype:
+      skinny -> THIN     normal / muscular -> REG     fat -> FAT
+
+  U-NECK
+  jersey_u_thin            1D 6F 16 CF
+  jersey_u_reg             81 F7 F4 A0
+  jersey_u_fat             7A 0A 7B D6
+
+  V-NECK
+  jersey_v_thin            9B FB 64 61
+  jersey_v_reg             C6 57 8E 70
+  jersey_v_fat             3D AA 01 06
+
+  WISHBONE
+  jersey_wishbone_thin     B2 74 D3 82
+  jersey_wishbone_reg      90 29 F5 09
+  jersey_wishbone_fat      6B D4 7A 7F
+
+  * One size per neck style is enough. It's used for all sizes.
+  * The neck style must match the team's uniform. Add U, V and wishbone
+    rows if you want the player covered in every uniform.
+  * Use NONMOVING (static) models. Copy the row from a NONMOVING
+    cloth_u / cloth_v / cloth_wishbone .iff.
+
+
+4) SHORTS   (row type: SCNE)
+---------------------------
+  shortsthin               F9 1E E2 6E
+  shortsreg                FE CC 5E 2C
+  shortsfat                05 31 D1 5A
+
+  * One row is enough. Use a NONMOVING model from NONMOVING cloth_shorts.iff.
+
+
+5) ACCESSORY TEXTURES   (row type: TXTR)
+---------------------------------------
+  The TEXTURE and/or NORMAL MAP change; the accessory model stays the game's.
+  The player must have the accessory equipped in the roster.
+
+  Accessory                       Texture       Normal map
+  headband                        46 A4 8C A9   57 79 DB B0
+  undershirt                      28 4C 68 D8   DC 78 91 0A
+  short-sleeve shirt              1F C8 34 CE   A2 3D 0E 86
+  long-sleeve shirt / full sleeve 14 BF DB B5   5E 43 5A 25
+  arm sleeve                      7E 28 9A FF   55 0E E6 3B
+  padded arm sleeve               6F F4 EC 60   1A B1 B5 3B
+  short sleeve                    6C D2 4D 44   4A 88 C4 C5
+  shoulder sleeve                 38 73 10 57   3E BD FC BF
+  PowerWEB arm sleeve             0F 6B 26 38   13 62 29 56 (*)
+  elbow pad / brace               7B 41 16 38   35 BB 6D D0
+  elbow sleeve                    04 63 3A 86   7D 25 FD 27
+  small/medium band, wrist band,
+    double wristband              6A EF 61 FE   66 7A E8 29
+  high band                       B0 5B C4 DA   31 2E 84 5C
+  strap                           B6 BD 49 71   EF D4 18 05
+  forearm band                    D6 46 D2 76   C7 48 A4 F5
+  protective wristband            8E 96 C7 EE   13 0D 18 DC
+  rubber band / double rubberband 97 55 11 F2   9A CA 2B A3
+  "I promise" rubber band         FB B9 E7 35   4A AF 51 EF
+  power band                      84 1E DB 78   20 17 63 87
+  wrist wrap                      D6 96 42 A5   9D 52 A1 BD
+  hand wrap                       98 DF 93 50   05 4D 18 4E
+  finger strap / double           0E 46 C4 01   53 E2 26 95
+  long index / middle strap       C7 4F F2 BB   82 72 3C 37
+  pressure shorts                 E9 E0 1C 61   BE 17 F0 72
+  high thigh pad                  EB B1 60 72   86 4B 8E A6
+  leg sleeve                      5D 69 1A D4   CE C6 BB 33
+  calf sleeve                     F9 66 7D CC   9F 0B 73 9E
+  padded calf sleeve              F4 88 BB 8C   1D 75 56 F0
+  half / mid calf sleeve          E1 A4 D0 30   8F 65 1A B8
+  hex pad half calf sleeve        60 FE 8A D8   92 7C 5A EC
+  Jordan calf sleeve              34 A1 2B B6   C8 D3 DB E4
+  knee pad                        19 C1 C1 B0   DE 56 5A 64
+  hex pad                         F5 08 0D B7   03 C5 AE F1
+  knee brace                      64 30 04 6B   57 94 0D 7E
+  knee sleeve                     C8 84 A0 24   F1 CE 95 F1
+  knee strap                      5D 50 7E C5   D7 C0 3D 5B
+  ankle brace                     C8 79 19 05   CF EC 8B C7
+  ankle wrap                      E7 9D 0E 40   C1 31 9A A4
+  ankle socks                     C4 52 02 5A   78 AA 0F 9B
+  short socks                     51 1C F1 31   DA 17 8B 1F
+  short double socks              9E EE 8F 94   BE DA 50 7A
+  medium socks                    7B 24 B4 A0   B4 FB AF 63
+  medium double socks             B4 D6 CA 05   D0 36 74 06
+  medium long socks               45 E2 62 04   11 20 9F A9
+  long socks                      BC 03 E9 07   40 67 6F 23
+  striped long socks              81 DA 22 CA   32 85 E0 C1 (*)
+
+  (*) no stock normal map with this FileID in global.iff. You can still add one
+      to a png; if the game never asks for it, it simply isn't used.
+
+  NORMAL MAPS: add a TXTR row with the Normal map FileID to the player's png.
+  The texture and the normal map are independent: a png can have only the
+  texture, only the normal map, or both. Anything missing comes from
+  global.iff. Normal maps are DXT5 (use the normal map from global.iff as the
+  starting point: export it in IFF Mod Studio, edit, import).
+  The normal map FileID is always the texture's name with "_n" added
+  (elbowsleeve 04 63 3A 86 -> elbowsleeve_n 7D 25 FD 27). The headband is the
+  exception: unif_headband_normal 57 79 DB B0.
+
+  * Some textures are shared by several accessories (6A EF 61 FE is used by
+    four bands). A custom one changes all of them for that player.
+  * Any size works; keeping the size of the original is safest.
+  * Changes show up without restarting the game: save the png, then close
+    and reopen Edit Player (or reload the player).
+  * Combinations: with AllowCombinations=1 every equipped slot is drawn,
+    e.g. arm sleeve + short-sleeve shirt, leg sleeve + knee pad.
+
+
+EXAMPLE  (png0195.iff after editing)
+-----------------------------------
+  47 F0 10 28  SCNE  hihead               (original)
+  53 21 A7 9E  SCNE  lohead               (original)
+  AE 2D 48 6A  TXTR  face_color           (original)
+  ...
+  4A 61 0F DA  SCNE  hi_body              <- custom body
+  A3 5C E4 DC  TXTR  legs_03_color        <- custom leg tattoos
+  90 29 F5 09  SCNE  jersey_wishbone_reg  <- custom jersey
+  FE CC 5E 2C  SCNE  shortsreg            <- custom shorts
+  7E 28 9A FF  TXTR  (arm sleeve)         <- custom arm sleeve texture
+  55 0E E6 3B  TXTR  (armsleeve_n)        <- custom arm sleeve normal map
+
+
+6) COACH POLO   (texture rows in global.iff, row type: TXTR)
+------------------------------------------------------------
+  OFF by default. With [CoachPolo] Enabled=1 coaches wear the polo instead of the
+  suit jacket. ShowArms=1 = coaches in a suit show whole arms (never players).
+  Name                     FileID
+  coach_suit_colorize      F0 75 27 59   <- polo colour/pattern (tinted with team colours)
+  coach_suit_normal        A5 FD 6D 9F   <- polo normal map
+
+  * Paint on the POLO layout (hi_body part 0-18), keep the size/format of
+    the original rows, and replace them in global.iff with RED MC.
+  * Or add rows with your own FileIDs and set Texture= / NormalMap= in the ini.
+
+
+7) TEAM COLOUR SOCKS   (sock texture rows, row type: TXTR)
+------------------------------------------------------------
+  Accessory textures are colour MASKS. Each channel is painted with one colour:
+      RED channel   -> colour 1      GREEN channel -> colour 2      BLUE channel -> colour 3
+  Pure red paints with colour 1, pure green with colour 2, pure blue with colour 3,
+  and the brightness of the channel is the shading. Stock socks are painted red only;
+  the striped long socks are blue with red stripes.
+
+  With [TeamColorSocks] Enabled=1 every sock type gets:
+      Style=1   red = TEAM 1   green = TEAM 2   blue = sock colour (white/black from the uniform)
+      Style=2   red = sock colour   green = TEAM 1   blue = TEAM 2
+  Style 1 = same as the striped long socks: stock socks turn Team 1 straight away;
+  paint parts blue to keep them white/black. Style 2 keeps stock socks white/black
+  and only the green/blue parts you paint take the team colours.
+  Striped long socks always keep their stock behaviour.
+
+  Name                     FileID
+  ankle socks              C4 52 02 5A
+  short socks              51 1C F1 31
+  short double socks       9E EE 8F 94
+  medium socks             7B 24 B4 A0
+  medium double socks      B4 D6 CA 05
+  medium long socks        45 E2 62 04
+  long socks               BC 03 E9 07
+  striped long socks       81 DA 22 CA   (stock: red = Team 1, blue = white)
+
+  * Paint with pure red / green / blue (DXT1, same size as the original row) and
+    replace the row in global.iff for everyone, or add it to a player's png for
+    that player only (it is an accessory texture, see section 5).
+  * Leave a sock type out of Socks= in the ini to keep it stock.
+
+
+8) HAIR STYLES   (whole-png variants, no FileIDs needed)
+------------------------------------------------------------
+  png19600.iff           <- Original
+  png19600_hair1.iff     <- shows as "hair1"
+  png19600_anyname.iff   <- shows as "anyname"
+  Edit Player > Body & Head > Hair Style (regular players only, below Height/Weight).
+  Pick one, then back out and reopen the player to see it. Saved in BodyHook_Hair.ini
+  (kept after restarting the game).
+
+
+9) NBA PATCH   (unif_nbapatch  0D AE 36 BF, row type: TXTR)
+------------------------------------------------------------
+  [NBAPatch] HeadbandOnly=1: this texture shows on headbands (Headband Logo) only.
+  Jerseys, shorts, socks, menus: no NBA patch. Edit the row in global.iff to change the
+  headband logo for everyone.
+
+
+QUICK CHECKS
+------------
+  [ ] png file is in the game folder (next to nba2k14.exe)
+  [ ] row TYPE is correct (SCNE / TXTR)
+  [ ] FileID typed exactly as above
+  [ ] roster CFID = png number
+  [ ] BodyHook.log lists the png at startup:
+        custom body / legs / uniform / accessory textures: pngXXXX.iff
+  [ ] no "NOT sorted" warning (else: python iff_tool.py sort pngXXXX.iff)

@@ -1,0 +1,10 @@
+bin/
+build/obj/
+*.obj
+*.lib
+*.exp
+*.pdb
+*.res
+*.ilk
+__pycache__/
+*.log

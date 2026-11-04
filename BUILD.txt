@@ -1,0 +1,13 @@
+BodyHook source
+
+  src/bodyhook.c        the whole hook
+  src/win_min.h         Win32 declarations for SDK-less builds
+  src/modloader.inc     the mod loader part of dinput8.dll (loads every .asi; not in BodyHook.asi)
+  src/dinput8.def       dinput8 proxy exports
+  build/build_msvc.bat  build with Visual Studio (x86 Native Tools prompt)
+  build/build_clangcl.bat  build with clang-cl on Windows
+  build/build_linux_clang.sh  cross-build on Linux (clang-cl + lld-link, llvm 18)
+  build/linux/*.def     import libraries for the Linux build (add new Win32 imports here)
+  tools/iff_tool.py     info / scan / hash / sort for .iff files
+
+Output: bin/dinput8.dll and bin/BodyHook.asi (same code; use one of them).
