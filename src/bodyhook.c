@@ -36,11 +36,7 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
-#ifdef WT_VER
-#define BODYHOOK_VERSION "1.11.24-ML WINGTEST v19"
-#else
 #define BODYHOOK_VERSION "2.0"
-#endif
 #include "slam_mod.h"   /* SLAM mod: slam_glue.c has DllMain + SlamModStart, this file starts in mod_start() */
 
 /* ------------------------------------------------------------------------------------------ */
@@ -128,7 +124,6 @@ static const char *kAccNrmDefault = "5779DBB0";
 static const char *kSockDefault = "C452025A, 511CF131, 9EEE8F94, 7B24B4A0, B4D6CA05, 45E26204, BC03E907";
 
 #define KNOWN_CALLSITE   0x00BF13AFu
-#define KNOWN_RESOLVER   0x00D94400u
 
 /* ------------------------------------------------------------------------------------------ */
 /* config                                                                                     */
@@ -178,6 +173,7 @@ static int  cfg_legCount = 0;
 #define CLOTH_GROUPS 8
 #define CLOTH_PER_GROUP 8
 static int  cfg_cloth = 1;
+static int  cfg_stockCloth = 1;   /* [Uniforms] StockClothSize (netcloth.inc) */
 static int  cfg_matchAnyCloth = 1;
 static int  cfg_clothBridge = 1;
 static int  cfg_cacheNoPng = 1;
@@ -405,7 +401,7 @@ static void t_done(int slot, u32 start)
 static u32 g_imgLo = 0, g_imgHi = 0;
 static volatile int g_imgFast = 0;    /* set once the game code is unpacked */
 static struct { u32 lo, hi, tick; } g_rq[RQ_CACHE];
-static volatile u32 g_rqNext = 0;
+static volatile u32 g_rqNext = 0, g_rqHit = 0;
 
 static int readable(const void *p, u32 n)
 {
@@ -414,8 +410,10 @@ static int readable(const void *p, u32 n)
     if (a < 0x10000 || end < a) return 0;
     if (g_imgFast && a >= g_imgLo && end <= g_imgHi) return 1;     /* the exe image is always mapped */
     now = GetTickCount();
+    i = g_rqHit;                                                     /* PERF 1.11.30-ML: last hit first */
+    if (i < RQ_CACHE && a >= g_rq[i].lo && end <= g_rq[i].hi && now - g_rq[i].tick < 250) return 1;
     for (i = 0; i < RQ_CACHE; i++)
-        if (a >= g_rq[i].lo && end <= g_rq[i].hi && now - g_rq[i].tick < 250) return 1;
+        if (a >= g_rq[i].lo && end <= g_rq[i].hi && now - g_rq[i].tick < 250) { g_rqHit = i; return 1; }
     while (a < end) {
         u32 lo, hi;
         if (!VirtualQuery((const void*)a, &mbi, sizeof(mbi))) return 0;
@@ -653,6 +651,7 @@ static void load_config(void)
     cfg_accCombos  = ini_int2("Accessories", "AllowCombinations", 1);
     cfg_keepArmElbow = ini_int2("Accessories", "KeepArmUnderElbowSleeve", 1);   /* 1.11.21-ML: on by default (2K12) */
     cfg_staticGuard = ini_int2("Uniforms", "StaticClothGuard", 1);
+    cfg_stockCloth = ini_int2("Uniforms", "StockClothSize", 1);
     cfg_accNormals = ini_int2("Accessories", "NormalMaps", 1);
     GetPrivateProfileStringA("Accessories", "TextureIDs", kAccTexDefault, buf, sizeof(buf), g_ini);
     s_trim(buf);
@@ -1320,14 +1319,8 @@ static int player_info(u8 *player, PngMasks *out)
     return 1;
 }
 
-#ifdef BODYHOOK_WINGTEST
-static void wt_note(u32 body);   /* wingtest.inc: remember the body models the game really uses */
-#endif
 static void log_lookup(const char *what, u8 *player, u32 cont, u32 req, u32 used, u32 from, void *res)
 {
-#ifdef BODYHOOK_WINGTEST
-    wt_note((u32)res);
-#endif
     if (!cfg_log) return;
     EnterCriticalSection(&g_logLock);
     if (!cfg_logEvery && seen_before((u32)player, cont, used, (u32)res != 0)) { LeaveCriticalSection(&g_logLock); return; }
@@ -1469,9 +1462,6 @@ static void jacket_restore(void *model)
 /* ------------------------------------------------------------------------------------------ */
 static u32 g_missLogged[64]; static int g_missCount = 0;
 
-#ifdef BODYHOOK_RESEARCH
-static void rs_note_player(u8 *player);
-#endif
 void *__cdecl BodyLookup(void *mgr, u32 section, u8 *player, u32 retAddr,
                          u32 container, u32 fileId, u32 type, u32 a4, u32 a5, u32 a6)
 {
@@ -1481,9 +1471,6 @@ void *__cdecl BodyLookup(void *mgr, u32 section, u8 *player, u32 retAddr,
     static volatile int dumped = 0, poloGlobal = 0;
     (void)retAddr;
     st_calls++;
-#ifdef BODYHOOK_RESEARCH
-    rs_note_player(player);
-#endif
 
     if (!cfg_enabled || container != 0 || type != TYPE_SCNE) {
         r = g_resolve(mgr, section, container, fileId, type, a4, a5, a6);
@@ -2342,6 +2329,14 @@ void __fastcall TeamColors(void *record, u32 edx, u32 *out)
             st_tcRemap++;
         }
     }
+    if (listed == 2 && cfg_log) {   /* 1.11.30-ML: which accessory textures really got the team colours */
+        static u32 seen[32]; static int ns = 0; int k, was = 0;
+        for (k = 0; k < ns; k++) if (seen[k] == rec[3]) was = 1;
+        if (!was && ns < 32) { seen[ns++] = rec[3];
+            blog("TEAMCOLOR accessory texture %08X (class %08X): red = %s, green = %s, blue = %s", rec[3], rec[0],
+                 out[0] == 2 ? "Team 1" : out[0] == 3 ? "Team 2" : "other", out[1] == 2 ? "Team 1" : out[1] == 3 ? "Team 2" : "other",
+                 rec[0] == g_sockVtable ? "sock colour" : "the accessory's own colour"); }
+    }
 }
 void __fastcall SockColors(void *record, u32 edx, u32 *out) { TeamColors(record, edx, out); }
 
@@ -2625,6 +2620,7 @@ static u32 g_simArr[2];         /* its ClothMesh array                          
 static u32 g_simFetch[2];       /* address of "mov ecx,[eax*4+array]" inside the builder (patched)   */
 static int g_simSites = 0;
 static volatile u32 st_simBridged = 0;
+static int st_simPracLog = 0;
 static volatile u32 g_suppressTid = 0;     /* thread that must see an empty ClothMesh slot, 0 = none */
 static const char *kGarment[2] = { "jersey", "shorts" };
 
@@ -2668,6 +2664,24 @@ static void *sim_call(int kind, void *player, u32 style, void *out, int pfn)
     if (pfn) return ((ClothSimP_t)g_simFnP[kind])(player, out);
     return ((ClothSim_t)g_simFn[kind])(player, style, out);
 }
+/* cloth objects whose in-place rebuild for another body size was refused (sim_core): the owner guard (bench.inc) must
+ * not swap them for "his own" cloth either - that cloth is made for the NEW size and the drawn model is still the old one */
+static struct { u32 obj, tick; } g_clothKept[16];
+static int hl_queue_idle(u32 prv, u32 rec);   /* hairrefresh.inc */
+static struct { u32 out, player, model, kind, tick; } g_simOut[64];   /* cloth objects the game built, and for whom */
+static void cloth_keep_note(u32 obj)
+{
+    int i, o = 0; u32 now = GetTickCount();
+    for (i = 0; i < 16; i++) { if (g_clothKept[i].obj == obj) { o = i; break; } if (now - g_clothKept[i].tick > now - g_clothKept[o].tick) o = i; }
+    g_clothKept[o].obj = obj; g_clothKept[o].tick = now;
+}
+static int cloth_kept(u32 obj)
+{
+    int i;
+    if (!obj) return 0;
+    for (i = 0; i < 16; i++) if (g_clothKept[i].obj == obj && GetTickCount() - g_clothKept[i].tick < 60000) return 1;
+    return 0;
+}
 static void *sim_core(int kind, void *player, u32 style, void *out, int pfn);
 static void *sim_common(int kind, void *player, u32 style, void *out) { return sim_core(kind, player, style, out, 0); }
 static void *sim_core(int kind, void *player, u32 style, void *out, int pfn)
@@ -2692,12 +2706,65 @@ static void *sim_core(int kind, void *player, u32 style, void *out, int pfn)
         read32(g_simArr[kind] + (u32)(idx * 4), &slotVal);
     } else idx = -99;
 
+    /* 1.11.31-ML: Edit Player Weight / Height across the fat line. The game rebuilds the cloth IN PLACE (same object)
+     * for the new body size while the drawn shorts model is still the old one until the preview is rebuilt: the fat
+     * shorts (544 particles) then ran on the regular cloth (424) -> shards and strips across the screen (log 2c32871d,
+     * 02:27:46). An in-place rebuild to a ClothMesh with another particle count keeps the cloth it has; the preview's
+     * own rebuild (new object) gets the new cloth. Skinny / regular / muscular all have 424, so only fat was hit. */
+    /* crash review: only a REAL in-place rebuild is refused - this object was built by us before for the same record and
+     * the same model ([record+1E8]), and its cloth still uses a ClothMesh the game has loaded now. A new object in memory
+     * that once held another cloth (freed and allocated again) is always built, else the game would run on stale data. */
+    {   u32 mdl = 0; int k, hit = -1, fr = 0; u32 now = GetTickCount();
+        read32((u32)player + 0x1E8, &mdl);
+        for (k = 0; k < 64; k++) { if (g_simOut[k].out == (u32)out) { hit = k; break; } if (now - g_simOut[k].tick > now - g_simOut[fr].tick) fr = k; }
+        if (hit >= 0 && out && slotVal && readable(out, 4) && g_simOut[hit].player == (u32)player && g_simOut[hit].model == mdl && g_simOut[hit].kind == (u32)kind) {
+            const u32 CLOTH_MAGIC = g_is2k12 ? 0x019957A3u : 0xF7CB9859u;
+            u32 in = *(u32*)out, om = 0, i, loaded = 0, n = kind ? 12 : 36, v;
+            if (in && readable((void*)in, 0xD0) && *(u32*)(in + 0xA4) == CLOTH_MAGIC) om = *(u32*)(in + 0xA8);
+            for (i = 0; om && i < n; i++) if (read32(g_simArr[kind] + i * 4, &v) && v == om) { loaded = 1; break; }
+            if (loaded && readable((void*)om, 0xD0) && *(u32*)(om + 0xA4) == CLOTH_MAGIC && readable((void*)slotVal, 0xD0) &&
+                (*(u32*)(in + 0xB8) & 0xFFF) != (*(u32*)(slotVal + 0xB8) & 0xFFF)) goto refuse;
+        }
+        if (hit < 0) hit = fr;
+        g_simOut[hit].out = (u32)out; g_simOut[hit].player = (u32)player; g_simOut[hit].model = mdl; g_simOut[hit].kind = (u32)kind; g_simOut[hit].tick = now;
+    }
+    if (0) {
+        refuse: {
+            u32 in = *(u32*)out;
+            static int lg;
+            if (lg < 8) { lg++; blog("CLOTHSIM CFID %s %s: rebuilt in place for another body size (%u -> %u particles) while the model is still the old one - kept until the model is rebuilt",
+                cfid_str(player_cfid((u8*)player)), kGarment[kind], *(u32*)(in + 0xB8) & 0xFFF, *(u32*)(slotVal + 0xB8) & 0xFFF); }
+            cloth_keep_note((u32)out);
+            /* 1.11.31: the game keeps asking for this rebuild until its model matches (each refused try re-placed the
+             * kept shorts: flicker). The Edit Player preview is rebuilt instead (as Hair Style live refresh does), so
+             * model and cloth come back together for the new body size. */
+            {   static u32 lastAsk; u32 rec = 0, prv = 0, now = GetTickCount();
+                if (now - lastAsk > 400 && read32(0x015DD518u, &rec) && rec > 0x10000 && read32(0x01F8CB70u, &prv) && prv &&
+                    player_cfid((u8*)player) == player_cfid((u8*)rec) && hl_queue_idle(prv, rec)) {
+                    lastAsk = now;
+                    *(volatile u32*)(prv + 0x138) = 1;
+                    { static int lg2; if (lg2 < 8) { lg2++; blog("CLOTHSIM CFID %s: Edit Player preview rebuilt for the new body size", cfid_str(player_cfid((u8*)player))); } }
+                }
+            }
+            return out;
+        }
+    }
+
     if (cfg_clothBridge && g_simFetch[kind]) {
         u32 cf;
         if (png_ready((u8*)player, &cf)) {
             PngMasks pm;
             if (!cfg_fastPath || !g_scanDone || !player_info((u8*)player, &pm) || pm.clothMask)
                 cloth_common_ex((u8*)player, site, &fromPng, 1);
+            /* 1.11.30-ML: practice reuses player records - a record can still point at the previous player's png
+             * container (another CFID): his moving shorts were then built static. Only his own png counts. */
+            if (fromPng && *(int*)0x1E85CD4 == 4) {
+                u32 owner = name_cfid(cf), me = player_cfid((u8*)player);
+                if (owner && me && owner != me) fromPng = 0;
+                if (st_simPracLog < 16) { st_simPracLog++;
+                    blog("CLOTHSIM practice: CFID %s %s, png container %s (CFID %u) -> %s", cfid_str(me), kGarment[kind],
+                         container_name(cf), owner, fromPng ? "static (his own png)" : "moving (container belongs to another player)"); }
+            }
         } else if (g_clothGetter[site]) {
             /* png not loaded yet (the normal case in games): decide from the png file on disk */
             void *R = ((ClothGetter_t)g_clothGetter[site])(player);
@@ -3719,13 +3786,11 @@ static DWORD WINAPI png_watch_thread(LPVOID unused)
 #include "wingspan.inc"        /* 1.11.25-ML: Edit Player "Wingspan" (arm length per player, ball follows) */
 #include "shortlen.inc"        /* 1.19.4 / 1.11.15-ML: Edit Player "Short Length" (moving cloth_shorts) */
 #include "roster.inc"          /* 1.11.26-ML: one settings file per roster */
+#include "netcloth.inc"       /* 1.11.30-ML: jerseys/shorts keep the stock cloth size (net hex edits) */
 #include "bench.inc"
 #include "editcam.inc"        /* 1.11.10 / 1.17.6: Edit Player camera zoom */
-#include "wingtest.inc"        /* research: wingspan test (only with /DBODYHOOK_WINGTEST) */
 #include "poolguard.inc"       /* cloth pool guard (practice mode) */
-#ifdef BODYHOOK_RESEARCH
-#include "research.inc"
-#endif
+#include "passer.inc"          /* 1.11.30-ML: Freestyle practice rebounder */
 
 
 /* ------------------------------------------------------------------------------------------ */
@@ -3818,6 +3883,7 @@ static DWORD WINAPI init_thread(LPVOID unused)
     install_arms();
     install_nbapatch();
     install_bench();
+    install_netcloth();
     if (cfg_enabled && cfg_cloth && (cfg_staticGuard || ini_int2("ShortLength", "Enabled", 1)) && !g_floorOrig[16]) install_floor_wrappers();   /* static-cloth guard / Short Length need them */   /* static-cloth guard needs them */
     scan_loose_pngs();   /* after patching, so a big png folder never delays the hooks */
     if (cfg_liveRefresh) CreateThread(NULL, 0, png_watch_thread, NULL, 0, NULL);
@@ -3828,13 +3894,8 @@ static DWORD WINAPI init_thread(LPVOID unused)
     install_roster();       /* after install_hair (CreateFileA) */
     sl_sync_hair();
     install_editcam();      /* after the scan: saved hair choices update the png row info */
-#ifdef BODYHOOK_WINGTEST
-    install_wingtest();
-#endif
     if (cfg_log) CreateThread(NULL, 0, perf_thread, NULL, 0, NULL);
-#ifdef BODYHOOK_RESEARCH
-    rs_start();
-#endif
+    install_passer();
     {
         int k;
         for (k = 0; k < 60; k++) {
@@ -3888,6 +3949,7 @@ int mod_start(void)
     find_text_section();
     blog("BodyHook %s  (per-cyberface bodies for NBA %s)", BODYHOOK_VERSION, g_is2k12 ? "2K12" : "2K14");
     blog("loaded as %s (SLAM mod, SLAM %s)", self, g_slam->slamVersion);
+    blog("settings  %s", g_ini);   /* 1.11.30-ML: which BodyHook.ini is read */
     blog("game dir  %s", g_dir);
     blog("exe TimeDateStamp=%08X SizeOfImage=%08X .text=%08X size %X", g_exeTimestamp, g_exeImageSize, (u32)g_textBase, g_textSize);
     blog("CFID: %s%s", cfg_cfidOffset == CFID_GAME ? "record CF_ID +3C, same as the game's png<cfid>.iff (MyCareer-safe)" :

@@ -52,10 +52,13 @@ static u32 player_key_raw(u8 *p)
 {
     u32 c = player_cfid(p), id;
     if (c) return c;
-    if (g_is2k12 || !p || !readable(p, 0x158) || !(p[0x9B] & 1)) return 0;
+    /* 1.11.28-ML: MyPLAYER (MyCareer) has no CFID and not always the generic-face bit: any player without a CFID
+     * is keyed by his roster ID (it was: generic bit required -> MyPLAYER had no key, no Short Length / Wingspan) */
+    if (g_is2k12 || !p || !readable(p, 0x158)) return 0;
     id = *(u32*)(p + 0x154);
     return id < 0x10000 ? (GEN_BIT | id) : 0;
 }
+static void nck_clear(void);
 static const char *gn_get(u32 id)
 {
     int i;
@@ -70,18 +73,30 @@ static void gn_set(u32 id, const char *name)
     for (i = 0; i < g_gnCount; i++) if (g_gn[i].id == id) break;
     if (i == g_gnCount && g_gnCount < GEN_NAMES) g_gn[g_gnCount++].id = id;
     if (i < GEN_NAMES) s_cpy(g_gn[i].name, name, 40);
+    nck_clear();
     if (g_gnInit) LeaveCriticalSection(&g_gnLock);
 }
-/* the key with the name check: 0 when the roster ID now holds someone else */
+/* the key with the name check: 0 when the roster ID now holds someone else.
+ * 1.11.27-ML: the result is cached per record + name pointers + key (this runs at draw time for every player). */
+static struct { u32 rec, n0, n1, key; int ok; } g_nck[64];
+static volatile u32 g_nckNext;
+static void nck_clear(void) { int i; for (i = 0; i < 64; i++) g_nck[i].rec = 0; }
 static u32 player_key(u8 *p)
 {
     u32 k = player_key_raw(p);
     if (k & GEN_BIT) {
         const char *saved = gn_get(k & 0xFFFF);
         if (saved && saved[0]) {
-            char nm[40];
-            player_name(p, nm, 40);
-            if (nm[0] && !name_eq(nm, saved)) return 0;
+            u32 n0 = *(u32*)p, n1 = *(u32*)(p + 4), j;
+            for (j = 0; j < 64; j++) if (g_nck[j].rec == (u32)p && g_nck[j].n0 == n0 && g_nck[j].n1 == n1 && g_nck[j].key == k) return g_nck[j].ok ? k : 0;
+            {
+                char nm[40]; int ok;
+                player_name(p, nm, 40);
+                ok = !nm[0] || name_eq(nm, saved);
+                j = g_nckNext++ & 63;
+                g_nck[j].rec = 0; g_nck[j].n0 = n0; g_nck[j].n1 = n1; g_nck[j].key = k; g_nck[j].ok = ok; g_nck[j].rec = (u32)p;
+                if (!ok) return 0;
+            }
         }
     }
     return k;

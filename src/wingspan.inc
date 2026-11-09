@@ -367,9 +367,12 @@ static void ws_ball(u32 model, int site)
                     /* b3: every changed hand within 35 cm counts (two hands on the ball: their average), nearer = more */
                     float dx = p[0] - e->o[h][0], dy = p[1] - e->o[h][1], dz = p[2] - e->o[h][2], d2 = dx * dx + dy * dy + dz * dz, r, f, wi;
                     if (d2 < best) best = d2;
-                    if (d2 >= 35.0f * 35.0f) continue;
+                    /* 1.11.31-ML: a held ball sits in the fingers, 25-35 cm from the wrist (two-hand holds, free
+                     * throw stance, passes, layups...): full up to 38 cm, fading out to 55 cm (was 20 / 35: the ball
+                     * moved only partly or not at all in those holds) */
+                    if (d2 >= 55.0f * 55.0f) continue;
                     r = ws_sqrt(d2);
-                    f = r <= 20.0f ? 1.0f : (35.0f - r) / 15.0f;   /* full up to 20 cm, fading out to 35 cm */
+                    f = r <= 38.0f ? 1.0f : (55.0f - r) / 17.0f;
                     wi = f / (r + 5.0f);
                     for (j = 0; j < 3; j++) bd[j] += wi * e->d[h][j];
                     sw += wi;
@@ -378,6 +381,27 @@ static void ws_ball(u32 model, int site)
                 }
             }
             if (best < 1e17f) { float r = ws_sqrt(best); if (r < g_wsBnear) g_wsBnear = r; }
+            /* 1.11.31-ML: menus (Edit Player preview): the bone array is shifted against the ball (wrists come out
+             * 130-170 cm in front of the body's first bone, the ball 30-60 cm from it - log afb27748), so no hand is
+             * "near" the ball. There a held object within 150 cm of such a player's first bone moves the way both his
+             * hands moved (the shift is the same for all his bones, so the hands' move is still right). */
+            if (!hit) {
+                WsW *pick = 0; float pb = 150.0f * 150.0f;
+                for (i = 0; i < WS_W; i++) { WsW *e = &g_wsW[i]; const float *b0; float wa, wb2, d2, x, y, z;
+                    if (!e->world || !e->hd || now - e->hd > 200 || e->base <= -1000) continue;
+                    b0 = (const float*)(e->world + 0x30);
+                    x = e->o[0][0] - b0[0]; y = e->o[0][1] - b0[1]; z = e->o[0][2] - b0[2]; wa = x * x + y * y + z * z;
+                    x = e->o[1][0] - b0[0]; y = e->o[1][1] - b0[1]; z = e->o[1][2] - b0[2]; wb2 = x * x + y * y + z * z;
+                    if (wa < 110.0f * 110.0f || wb2 < 110.0f * 110.0f) continue;      /* hands where they belong: not this case */
+                    x = p[0] - b0[0]; y = p[1] - b0[1]; z = p[2] - b0[2]; d2 = x * x + y * y + z * z;
+                    if (d2 < pb) { pb = d2; pick = e; }
+                }
+                if (pick) {
+                    for (j = 0; j < 3; j++) bd[j] = 0.5f * (pick->d[0][j] + pick->d[1][j]);
+                    sw = 1.0f; fall = 1.0f; hit = 1;
+                    { static int lg; if (lg < 3) { lg++; blog("WINGSPAN menu ball: held object moved with both hands (%d %d %d cm)", (int)bd[0], (int)bd[1], (int)bd[2]); } }
+                }
+            }
             if (hit && sw > 0.0f) {
                 float w = fall;
                 for (j = 0; j < 3; j++) t[j] += fall * bd[j] / sw;
@@ -445,9 +469,6 @@ static void install_wingspan(void)
     cfg_wsStep = (float)i / 500.0f;                            /* 10 = +MaxPercent, 0 = -MaxPercent */
     if (!cfg_ws) { blog("wingspan: off ([Wingspan] Enabled=0)"); return; }
     if (g_is2k12) { cfg_ws = 0; blog("wingspan: NBA 2K14 only"); return; }
-#ifdef BODYHOOK_WINGTEST
-    cfg_ws = 0; blog("wingspan: off in the WINGTEST build (same hooks)"); return;
-#endif
     InitializeCriticalSection(&g_wsLock);
     ws_load();
 

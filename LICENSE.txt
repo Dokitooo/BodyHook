@@ -1,0 +1,32 @@
+BodyHook - Copyright (c) 2026 Alexiconn2K. All rights reserved.
+
+BodyHook is free. By installing or sharing it you agree to these terms:
+
+1. You may use BodyHook for free, in single-player and in your own videos,
+   screenshots and streams.
+
+2. You may share BodyHook for free, but only unchanged, as the original
+   files, and with credit to Alexiconn2K. Linking to the original release
+   is preferred.
+
+3. You may NOT sell BodyHook, charge for access to it, bundle it with
+   anything that is sold, or put it behind a paywall, subscription or
+   "donate to download" link. This applies to the original files and to
+   any modified or derived version.
+
+4. You may NOT modify, decompile, disassemble or reverse-engineer BodyHook,
+   and you may NOT share modified versions or anything derived from it,
+   without written permission from Alexiconn2K. This also applies to using
+   AI tools or automated tools to analyse, decompile, rewrite or
+   re-implement BodyHook.
+
+5. Custom content that you make for BodyHook (cyberfaces, bodies,
+   uniforms, accessory textures, hair variants and so on) belongs to you.
+   This license covers only BodyHook itself.
+
+6. BodyHook is provided "as is", without any warranty. You use it at your
+   own risk. Alexiconn2K is not responsible for any damage to your game,
+   files or computer.
+
+NBA 2K14 is a trademark of its respective owners. BodyHook is a fan-made
+mod and is not affiliated with or endorsed by 2K or the NBA.

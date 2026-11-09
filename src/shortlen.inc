@@ -178,6 +178,13 @@ static u32 sl_fp_cached(u32 mesh)
     return g_slFpc[h].fp;
 }
 
+static volatile int g_clothForceOwn;   /* bench.inc */
+static volatile int g_psFsOwn = 0;      /* passer.inc: Freestyle passers installed */
+/* 1.11.30-ML: own cloth in Freestyle from its first frame (was only once the passers were made, ~2 s in: meanwhile the
+ * shared replay cloth - handed round between records, with another player's short-length copy - left the user's
+ * shorts invisible, log f39c78fe) */
+#define CLOTH_PRACTICE_OWN() (*(int*)0x1E85CD4 == 4 && (g_clothForceOwn || (g_psFsOwn && *(int*)0x1E85A90 && *(int*)0x1E85CD8 == 0)))
+static int g_slKeepLog = 0;
 static SlVar *sl_variant(u32 mesh, int len)
 {
     const u8 *M = (const u8*)mesh;
@@ -192,6 +199,13 @@ static SlVar *sl_variant(u32 mesh, int len)
     for (k = 0; k < g_slVarCount; k++)
         if (g_slVar[k].mesh == mesh && g_slVar[k].rest0 == rest0 && g_slVar[k].len == (u32)len && !g_slVar[k].dead) {
             if (g_slVar[k].fp == fp) return &g_slVar[k];
+            /* 1.11.30-ML: practice with the Freestyle passers - a png's moving/static shorts make the shared ClothMesh
+             * look "loaded again" over and over (log 761dae9b), and the copy was then made from the png's shorts: the
+             * passer drawn with the global shorts got torn cloth. There the first copy is kept. */
+            if (CLOTH_PRACTICE_OWN()) {
+                if (g_slKeepLog < 10) { g_slKeepLog++; blog("SHORT LENGTH  ClothMesh %08X changed during practice - length %d copy kept", mesh, len); }
+                return &g_slVar[k];
+            }
             /* same addresses, other shorts: never use it again (instances still on it are moved by sl_apply) */
             g_slVar[k].dead = 1;
             blog("SHORT LENGTH  ClothMesh %08X was loaded again with other shorts - its length %d copy is made again", mesh, len);
@@ -441,6 +455,47 @@ __declspec(naked) void SlTextLookup(void)
     }
 }
 
+/* 1.11.30-ML: the same answers from INSIDE the lookup (2K14, 0065FED8: cmp ecx,eax / je 0065FF56 / lea esp,[esp]).
+ * Another mod (SigExt 1.10 / GotoShotExt) owning the first bytes made the start pattern fail -> no Short Length /
+ * Wingspan rows anywhere (log f39c78fe). Here edx = key|1 and ebx ebp esi edi + 0C bytes of locals are on the stack. */
+u32 g_slMidFound = 0, g_slMidLoop = 0;
+__declspec(naked) void SlTextLookupMid(void)
+{
+    __asm {
+        cmp  edx, 250C7803h
+        je   label_
+        cmp  edx, 6BF51A23h
+        je   help_
+        cmp  edx, 9E50F30Dh
+        je   wlabel_
+        cmp  edx, 0B16A1C6Fh
+        je   whelp_
+        cmp  ecx, eax
+        je   none_
+        jmp  dword ptr [g_slMidLoop]
+    none_:
+        jmp  dword ptr [g_slMidFound]
+    label_:
+        lea  eax, g_slLabelW
+        jmp  out_
+    help_:
+        lea  eax, g_slHelpW
+        jmp  out_
+    wlabel_:
+        lea  eax, g_wsLabelW
+        jmp  out_
+    whelp_:
+        lea  eax, g_wsHelpW
+    out_:
+        pop  edi
+        pop  esi
+        pop  ebp
+        pop  ebx
+        add  esp, 0Ch
+        ret
+    }
+}
+
 static HairVis_t g_slVisCreated = 0;   /* the stock Hair Style visibility: 0 = created player */
 static Fmt_t     g_slFmt = 0;
 static u32       g_slStrHandler = 0, g_slEditRec = 0, g_slFmtKey = STRING_FMT_KEY;   /* 2K12: the Hair Style row's own key */
@@ -652,6 +707,22 @@ static void install_shortlen(void)
         b[0] = 0xE9; memcpy(b + 1, &rel, 4); b[5] = 0x90;
         g_slLoc = patch_bytes((u32)loc, b, 6, 1);
     }
+    if (!g_slLoc && !g_is2k12) {   /* 1.11.30-ML: the start is another mod's: hook inside it */
+        static const u8 kMid[] = { 0x89,0x4C,0x24,0x18, 0x89,0x44,0x24,0x10, 0x3B,0xC1, 0x74,0x7A, 0x8D,0x64,0x24,0x00,
+                                   0x8B,0x40,0x08, 0x89,0x44,0x24,0x14, 0x8B,0xE8 };
+        static const u8 kMid2[] = { 0x3B,0xC1, 0x74,0x7A, 0x8D,0x64,0x24,0x00, 0x8B,0x40,0x08, 0x89,0x44,0x24,0x14, 0x8B,0xE8,
+                                    0x8D,0xA4,0x24,0x00,0x00,0x00,0x00, 0x0F,0xB7,0x45,0x02 };
+        u8 *m = find_text(kMid, sizeof(kMid), 0), *m2;
+        m2 = m ? m + 8 : find_text(kMid2, sizeof(kMid2), 0);   /* 0065FED0 may be GotoShotExt's jump */
+        if (m2 && !(m && find_text(kMid, sizeof(kMid), m + 1)) && !(!m && find_text(kMid2, sizeof(kMid2), m2 + 1))) {
+            u8 b[8];
+            int rel = (int)((u32)&SlTextLookupMid - ((u32)m2 + 5));
+            g_slMidLoop = (u32)m2 + 8; g_slMidFound = (u32)m2 + 4 + 0x7A;
+            b[0] = 0xE9; memcpy(b + 1, &rel, 4); b[5] = b[6] = b[7] = 0x90;
+            g_slLoc = patch_bytes((u32)m2, b, 8, 1);
+            if (g_slLoc) blog("SHORT LENGTH  text lookup start is changed by another mod - hooked inside it at %08X", (u32)m2);
+        }
+    }
     if (!g_slLoc) { blog("WARNING short length: text lookup not found - no Edit Player row (saved lengths still apply)"); return; }
 
     /* 2. the Hair Style record (template) and the page that lists it */
@@ -692,15 +763,25 @@ static void install_shortlen(void)
     /* 3. our record: the Hair Style record with our texts and callbacks */
     memcpy(g_slRec, (void*)hf.item, 0x4C);
     memcpy(g_slVisObj, (void*)visObj, sizeof(g_slVisObj));
-    {   /* the Hair Style list of visibility functions, its "created players only" one replaced by ours */
-        int k, put = 0;
-        for (k = 0; k < 7 && *(u32*)(visVt + 4 * k); k++) {
-            u32 f = *(u32*)(visVt + 4 * k);
-            if (f == visFn || f == (u32)&HairVisible) { f = (u32)&SlVisible; put = 1; }
-            g_slVisVt[k] = f;
+    {   /* 1.11.28-ML: Weight's list of visibility functions + ours. It was the Hair Style list, whose first function
+           (004FDC70) hides a row in MyCareer's Edit Player (there only Height and Weight are shown) - so the Short
+           Length / Wingspan rows were never in MyCareer. Weight's list (004FDCC0) keeps them wherever Weight is. */
+        /* 1.11.29-ML: Weight's 004FDCC0 answers 2 (greyed, not editable) in MyCareer: our rows use only SlVisible on
+           2K14 (shown + editable wherever the player has a key); 2K12 keeps the Hair Style rules. */
+        int k = 0;
+        u32 wVt = g_is2k12 ? 0 : 1;
+        if (!k && wVt) { g_slVisVt[0] = (u32)&SlVisible; g_slVisVt[1] = 0; k = 1; }
+        else {   /* not as expected: the old way (Hair Style list, its created-players-only function replaced) */
+            int put = 0;
+            for (; k < 6 && *(u32*)(visVt + 4 * k); k++) {
+                u32 f = *(u32*)(visVt + 4 * k);
+                if (f == visFn || f == (u32)&HairVisible) { f = (u32)&SlVisible; put = 1; }
+                g_slVisVt[k] = f;
+            }
+            if (!put) g_slVisVt[k++] = (u32)&SlVisible;
+            g_slVisVt[k] = 0;
         }
-        if (!put && k < 7) g_slVisVt[k++] = (u32)&SlVisible;
-        g_slVisVt[k] = 0;
+        blog("SHORT LENGTH / WINGSPAN rows: %s", wVt ? "shown and editable in every mode (MyCareer too)" : "Hair Style rules");
     }
     memcpy(g_slStepObj, (void*)stepObj, 16);
     g_slVisObj[1] = (u32)g_slVisVt;

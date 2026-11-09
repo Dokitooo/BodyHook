@@ -167,6 +167,13 @@ int __cdecl HairVisible(void)
     return r;
 }
 
+typedef int (__cdecl *GameMode_t)(void);
+int __cdecl HairMcVisible(void)
+{
+    if (((GameMode_t)0x0048EF10u)() != 3) return 0;          /* not MyCareer: 004FDC70 answered 0 here too */
+    return hair_rec_cfid(hair_edit_rec(0)) ? 0 : 3;
+}
+
 void __fastcall HairText(u8 *rec, void *sink, u32 unused)
 {
     static u16 wbuf[HAIR_TAG_LEN + 8];
@@ -512,6 +519,12 @@ static void install_hair(void)
     {
         u32 v1 = (u32)&HairVisible, v2 = (u32)&HairText, v3 = (u32)&HairNext, v4 = (u32)&HairPrev;
         n += patch_bytes(visVt + visSlot, &v1, 4, 0);
+        /* 1.11.29-ML: MyCareer. The row's first visibility function 004FDC70 hides it in MyCareer (game mode 3,
+           0x48EF10); in its place: MyCareer -> shown for a MyPLAYER with a CFID, other modes -> as before (shown). */
+        if (!g_is2k12 && visSlot != 0 && *(u32*)visVt == 0x004FDC70u && hair_bytes(0x004FDC70u, "E8 ?? ?? ?? ?? 83 E8 03")) {
+            u32 v0 = (u32)&HairMcVisible;
+            if (patch_bytes(visVt, &v0, 4, 0)) blog("HAIR STYLES  MyCareer: row shown for a MyPLAYER with a CFID");
+        }
         n += patch_bytes(f.item + 0x28, &v2, 4, 0);
         n += patch_bytes(stepObj + 4, &v3, 4, 0);
         n += patch_bytes(stepObj + 8, &v4, 4, 0);

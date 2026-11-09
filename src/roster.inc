@@ -81,7 +81,7 @@ static void roster_migrate_old(const char *into)
 static void roster_reload(void)
 {
     int i;
-    EnterCriticalSection(&g_gnLock); g_gnCount = 0; LeaveCriticalSection(&g_gnLock);
+    EnterCriticalSection(&g_gnLock); g_gnCount = 0; nck_clear(); LeaveCriticalSection(&g_gnLock);
     {   /* hair: previous choices back to the original png first (png row info), then the new roster's */
         static u32 prev[MAX_HAIR_SEL]; int np = 0;
         EnterCriticalSection(&g_hairLock);

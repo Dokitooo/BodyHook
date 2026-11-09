@@ -153,6 +153,7 @@ static void bench_diag(u32 m, u32 d, u32 state, const char *what)
     read32(d + 0x2C, &j); read32(d + 0x30, &s); read32(d + 0x08, &pl);
     if (j) read32(j, &j0);
     if (s) read32(s, &s0);
+    nc_note(j0); nc_note(s0);   /* 1.11.30-ML: player garment cloth -> stock cloth size (netcloth.inc) */
     key = (j ? 1 : 0) | (s ? 2 : 0) | (*(u32*)(f + 0x560) ? 4 : 0) | (*(u32*)(f + 0x55C) ? 8 : 0) | (*(u32*)(f + 0x100) ? 16 : 0) |
           (j0 ? 32 : 0) | (s0 ? 64 : 0) | ((pl ? player_cfid((u8*)pl) : 0) << 8);
     EnterCriticalSection(&g_logLock);
@@ -195,8 +196,10 @@ static u32 bench_need(u32 builder)
  * built from right now. Kept cloth objects (bench, own cloth in practice) are built again when it changes: a
  * cloth file / png loaded again left them on the old shorts' data - in practice that was a player drawn with
  * shorts torn into a big grey triangle across the floor. */
+static volatile int g_clothForceOwn;
 static u32 cloth_src_key(u32 player, u32 sj, u32 ss)
 {
+    int nofp = CLOTH_PRACTICE_OWN();   /* passer: mesh fp flips each draw -> rebuild thrash */
     u32 bodyw = 0, k = 0x9E3779B9u, mesh, st;
     int bt, kind;
     if (!read32(player + P_offBodyWord, &bodyw)) return 0;
@@ -206,7 +209,7 @@ static u32 cloth_src_key(u32 player, u32 sj, u32 ss)
         st = kind ? ss : sj;
         mesh = 0;
         if (g_simArr[kind] && st < 16 && read32(g_simArr[kind] + (u32)(bt + (int)st * 4) * 4, &mesh) && mesh)
-            k = (k ^ mesh ^ sl_fp_cached(mesh)) * 0x01000193u;
+            k = (k ^ mesh ^ (nofp ? 0 : sl_fp_cached(mesh))) * 0x01000193u;
         else k = (k ^ (u32)(kind + 1)) * 0x01000193u;
     }
     return k;
@@ -509,16 +512,42 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
     return (int)v;
 }
 
+
+/* 1.11.29-ML practice passer: in practice the game draws every player with ONE moving cloth set. With a second
+ * player on the floor (Freestyle passer, FT practice) both were drawn with the same simulated cloth object, so
+ * one of them showed it far away / not at all. The first player seen with an object keeps it; anyone else drawn
+ * with the same object within 300 ms gets his own cloth objects. */
+static struct { u32 obj, player, tick; } g_clothShare[16];
+static void own_retire_all(void)   /* 1.11.29-ML: the game rebuilt its players (pause / restart): drop our own cloth objects */
+{ int i; u32 now = GetTickCount(); EnterCriticalSection(&g_logLock); for (i = 0; i < g_ownObjN; i++) if (g_ownObj[i].used && !g_ownObj[i].retired) { g_ownObj[i].retired = 1; g_ownObj[i].retireTick = now; } LeaveCriticalSection(&g_logLock); }   /* 1.11.29-ML: practice passer on the floor -> every player gets his own cloth */
+static int cloth_shared(u32 obj, u32 player, u32 now)
+{
+    int i, free_ = -1;
+    if (!obj || *(int*)0x1E85CD4 != 4) return 0;
+    for (i = 0; i < 16; i++) {
+        if (g_clothShare[i].obj == obj) {
+            if (g_clothShare[i].player == player || now - g_clothShare[i].tick > 300) { g_clothShare[i].player = player; g_clothShare[i].tick = now; return 0; }
+            return 1;
+        }
+        if (free_ < 0 && (!g_clothShare[i].obj || now - g_clothShare[i].tick > 2000)) free_ = i;
+    }
+    if (free_ >= 0) { g_clothShare[free_].obj = obj; g_clothShare[free_].player = player; g_clothShare[free_].tick = now; }
+    return 0;
+}
 /* bit 1 jersey / 2 shorts swapped, bit 4: place flag (+38) set */
 static int owner_guard(u32 d, u32 *saveJ, u32 *saveS, u32 *save38)
 {
     u32 j = 0, s = 0, j0 = 0, s0 = 0, player = 0, mJ = 0, mS = 0, eJ, eS, sj = 1, ss = 0, oJ, oS;
-    int bad = 0, fresh = 0, r = 0;
+    int bad = 0, fresh = 0, r = 0, noSim;
     if (!cfg_enabled || !cfg_cloth || !g_simFn[0] || !g_simFn[1] || !g_simFetch[0] || !g_simFetch[1]) return 0;
     if (!read32(d + 0x2C, &j) || !read32(d + 0x30, &s) || !read32(d + 0x08, &player) || !player) return 0;
     if (j) read32(j, &j0);
     if (s) read32(s, &s0);
-    if (!j0 && !s0) return 0;                                /* nothing simulated on this node */
+    /* 1.11.30-ML: practice with the passers - the outfit nodes are handed round between players; a node built for a
+     * png player with static shorts (no cloth instance) went to a passer whose shorts move: drawn stiff (log
+     * 517b9fd1: node shorts 2B865380 sim 0 on CFID 2149, then on 19805). Such a player gets his own moving cloth. */
+    noSim = s && !s0 && CLOTH_PRACTICE_OWN() && !garment_static(player, 1);
+    if (!j0 && !s0 && !noSim) return 0;                      /* nothing simulated on this node */
     if (j0) read32(j0 + 0xA8, &mJ);
     if (s0) read32(s0 + 0xA8, &mS);
     if (edit_preview(player)) return 0;                      /* 1.11.24-ML: Edit Player keeps the game's cloth */
@@ -528,20 +557,30 @@ static int owner_guard(u32 d, u32 *saveJ, u32 *saveS, u32 *save38)
     if (!mesh_usable(eJ) || !mesh_usable(eS) || !own_fits()) return 0;   /* 1.11.24-ML: never build from a bad / too big mesh */
     if (j0 && mJ != eJ) bad |= 1;
     if (s0 && mS != eS) bad |= 2;
+    if (noSim && eS) bad |= 2;                               /* his shorts move: own cloth */
+    { u32 now = GetTickCount();
+      if (CLOTH_PRACTICE_OWN()) { if (j0) bad |= 1; if (s0) bad |= 2; }
+      if (j0 && !(bad & 1) && cloth_shared(j0, player, now)) bad |= 1;
+      if (s0 && !(bad & 2) && cloth_shared(s0, player, now)) bad |= 2; }
+    if (cloth_kept(j)) bad &= ~1;                              /* 1.11.31: kept on purpose (Edit Player body size step) */
+    if (cloth_kept(s)) bad &= ~2;
     if (!bad) return 0;
     if (!own_objects(player, sj, ss, &oJ, &oS, &fresh)) return 0;
+    { u32 x = 0; if (oJ && read32(oJ, &x)) nc_note(x); x = 0; if (oS && read32(oS, &x)) nc_note(x); }
     if (bad & 1) { *saveJ = j; *(u32*)(d + 0x2C) = oJ; r |= 1; }
     if (bad & 2) { *saveS = s; *(u32*)(d + 0x30) = oS; r |= 2; }
     if (fresh) { *save38 = *(u32*)(d + 0x38); *(u32*)(d + 0x38) = 1; r |= 4; }
     st_ownSwaps++;
-    if (cfg_log) {
+    { static u32 lp, lJ, lS, lb;   /* PERF 1.11.30-ML: the same swap every frame takes no lock just to be skipped */
+      if (cfg_log && (lp != player || lJ != mJ || lS != mS || lb != (u32)bad)) {
+        lp = player; lJ = mJ; lS = mS; lb = (u32)bad;
         EnterCriticalSection(&g_logLock);
         if (!seen_before(player ^ 0x09000000u, mJ, mS, (u32)bad))
             blog("OWNCLOTH CFID %s: node %08X had %s%s%s cloth made for another body size / uniform (ClothMesh %08X/%08X, his %08X/%08X) - his own used",
                  cfid_str(player_cfid((u8*)player)), d, (bad & 1) ? "jersey" : "", (bad == 3) ? " + " : "", (bad & 2) ? "shorts" : "",
                  mJ, mS, eJ, eS);
         LeaveCriticalSection(&g_logLock);
-    }
+    } }
     return r;
 }
 
