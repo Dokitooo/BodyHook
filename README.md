@@ -4,7 +4,7 @@ BodyHook gives every player his own body, leg tattoos, jersey/shorts models and 
 textures from his cyberface file (`pngXXXX.iff`), and adds **Hair Style**, **Short Length** and
 **Wingspan** rows to Edit Player, saved per roster. It is a [SLAM](https://github.com/Dokitooo/SLAM) mod.
 
-**Download:** [BodyHook.zip](https://github.com/Dokitooo/BodyHook/releases/latest/download/BodyHook.zip) (latest release) ·
+**Download:** [BodyHook.zip](https://github.com/Dokitooo/BodyHook/releases/latest/download/BodyHook.zip) (latest release) · [changelog](CHANGELOG.md) ·
 [all releases](https://github.com/Dokitooo/BodyHook/releases)
 
 ## Requirements
@@ -17,7 +17,7 @@ textures from his cyberface file (`pngXXXX.iff`), and adds **Hair Style**, **Sho
 1. Install SLAM first (see its README).
 2. Remove any old BodyHook: the BodyHook `dinput8.dll` (SLAM's replaces it) and `BodyHook.asi`
    from the game folder or `scripts\`.
-3. Copy the `BodyHook` folder from the zip into the game's `SLAM` folder:
+3. Extract the zip into the game folder (the one with `nba2k14.exe`). It contains only:
    ```
    SLAM\BodyHook\BodyHook.asi
    SLAM\BodyHook\BodyHook.ini
@@ -36,13 +36,13 @@ custom-content reference is [`package/CHEATSHEET.txt`](package/CHEATSHEET.txt).
 | `slam/` | SLAM SDK header and glue |
 | `build/` | Build scripts (MSVC, clang-cl on Linux) |
 | `tools/` | `iff_tool.py`, test harnesses, NBA 2K12 address mapping |
-| `package/` | The README, cheat sheet, compatibility notes and default `.ini` shipped in the zip |
+| `package/` | The manual, cheat sheet, compatibility notes and default `.ini` |
 
 ## Build
 
 From an *x86 Native Tools Command Prompt for VS*: `build\build_msvc.bat`, or on Linux with
 clang-cl + lld-link: `build/build_linux_clang.sh`. Output: `bin\BodyHook.asi`.
-`src/bodyhook.rc` holds the version resource used for release binaries.
+`build/build_plain.sh` builds a plain `.asi` for any ASI loader. `src/bodyhook.rc` is an optional version resource.
 
 ## Verify your download
 
@@ -64,7 +64,6 @@ flag on unknown files. To make the release easy to check:
 
 - The full source is in this repository; the release binaries are built from it.
 - Binaries are not packed, compressed or obfuscated, and the zip has no password.
-- Every binary carries version information (right-click > Properties > Details).
 - SHA-256 checksums are published with each release.
 
 If your antivirus still flags a file, you can submit it as a false positive to the vendor, or

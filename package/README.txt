@@ -7,7 +7,7 @@ NEW IN 2.0
 ----------
   * SLAM mod: BodyHook now runs under SLAM (the NBA 2K14 mod loader) with its
     own folder SLAM\BodyHook\ (asi, ini, log, rosters\). A plain .asi for any
-    ASI loader is included too.
+    ASI loader can be built from the source (build/build_plain.sh).
   * SHORT LENGTH - Edit Player > Body and Head has a "Short Length" row
     (0 shortest .. 10 longest, 5 = the shorts as your cloth file has them).
     Per player, used everywhere (menus, games, replays). Needs MOVING
@@ -40,13 +40,14 @@ NEW IN 2.0
 
 INSTALL
 -------
-SLAM (recommended): copy SLAM\BodyHook\ into the game's SLAM folder
+SLAM (recommended): extract the zip into the game folder (it holds SLAM\BodyHook\)
   (needs SLAM 1.0: the SLAM folder + dinput8.dll in the nba2k14.exe folder).
   Log: SLAM\BodyHook\BodyHook.log
 
-Plain .asi (any ASI loader, no SLAM): put plain\BodyHook.asi where your loader
-  reads .asi files (game folder or scripts\) and the plain\BodyHook\ folder
-  (BodyHook.ini) next to it. Log: BodyHook\BodyHook.log
+Plain .asi (any ASI loader, no SLAM; not in the download, build it from the
+  source with build/build_plain.sh): put BodyHook.asi where your loader reads
+  .asi files (game folder or scripts\) and a BodyHook\ folder (BodyHook.ini)
+  next to it. Log: BodyHook\BodyHook.log
   Use ONE of the two, not both.
 
 Already using BodyHook? Keep your own BodyHook.ini and rosters\ folder.
