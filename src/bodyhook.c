@@ -3892,6 +3892,7 @@ static DWORD WINAPI init_thread(LPVOID unused)
     install_wingspan();     /* 1.11.25-ML: before install_shortlen (which adds its Edit Player row) */
     install_shortlen();     /* after install_hair: copies the Hair Style record */
     install_roster();       /* after install_hair (CreateFileA) */
+    install_editsession();  /* 2.0 fix: Edit Player Accept / not accepted */
     sl_sync_hair();
     install_editcam();      /* after the scan: saved hair choices update the png row info */
     if (cfg_log) CreateThread(NULL, 0, perf_thread, NULL, 0, NULL);

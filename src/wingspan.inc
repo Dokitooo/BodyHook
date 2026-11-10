@@ -455,7 +455,7 @@ static void ws_save(u32 cfid, int v, u8 *rec)
     key_str(cfid, key);
     u32_to_dec((u32)v, val);
     val_named(vn, sizeof(vn), val, cfid, rec);
-    pend_write("Wingspan", key, v == 5 ? NULL : vn);   /* 2.1: written when the game saves */
+    edit_write("Wingspan", key, v == 5 ? NULL : vn);   /* 2.1: written when the game saves (2.0 fix: once accepted) */
 }
 
 static void install_wingspan(void)

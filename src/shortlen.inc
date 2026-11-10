@@ -527,9 +527,10 @@ static void gen_claim(u32 key, u8 *rec)
         char ks[12];
         key_str(key, ks);
         blog("roster ID %s now holds %s (was %s): his old Short Length / Wingspan dropped", ks + 1, nm, saved);
+        es_remember(ES_SL, key); es_remember(ES_WS, key);          /* 2.0 fix: tentative while Edit Player edits a copy */
         EnterCriticalSection(&g_slLock); sl_set(key, 5); LeaveCriticalSection(&g_slLock);
-        pend_write("ShortLength", ks, NULL);
-        ws_set(key, 5); pend_write("Wingspan", ks, NULL);
+        edit_write("ShortLength", ks, NULL);
+        ws_set(key, 5); edit_write("Wingspan", ks, NULL);
     }
     gn_set(key & 0xFFFF, nm);
 }
@@ -570,6 +571,7 @@ static int sl_step(u8 *rec, int dir)
     char key[12], val[4], v[64];
     if (!cfid) return 0;
     gen_claim(cfid, sl_rec(rec));
+    es_remember(ES_SL, cfid);                  /* 2.0 fix: undone if Edit Player is left without accepting */
     EnterCriticalSection(&g_slLock);
     len = sl_get(cfid);
     now = len + dir;
@@ -582,7 +584,7 @@ static int sl_step(u8 *rec, int dir)
     key_str(cfid, key);
     u32_to_dec((u32)now, val);
     val_named(v, sizeof(v), val, cfid, sl_rec(rec));
-    pend_write("ShortLength", key, now == 5 ? NULL : v);   /* 2.1: written when the game saves */
+    edit_write("ShortLength", key, now == 5 ? NULL : v);   /* 2.1: written when the game saves (2.0 fix: once accepted) */
     return 1;
 }
 int __fastcall SlNext(u8 *rec, u32 unused) { (void)unused; return sl_step(rec, +1); }
@@ -626,6 +628,7 @@ static int ws_step(u8 *rec, int dir)
     if (now < 0) now = 0;
     if (now > 10) now = 10;
     if (now == v) return 0;
+    es_remember(ES_WS, cfid);                  /* 2.0 fix: undone if Edit Player is left without accepting */
     ws_set(cfid, now);
     ws_save(cfid, now, sl_rec(rec));
     { char ks[12]; key_str(cfid, ks); blog("WINGSPAN  %s %s -> %d%s", key_what(cfid), ks, now, now == 5 ? " (original)" : ""); }

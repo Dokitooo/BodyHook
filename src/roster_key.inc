@@ -189,3 +189,68 @@ static int pend_commit(const char *path)            /* the game saved: write the
     return n;
 }
 static int pend_drop(void) { int n; pend_lock(); n = g_npendw; g_npendw = 0; pend_unlock(); return n; }
+
+/* ------------------------------------------------------------------------------------------ */
+/* 2.0 fix (user 19:38): Edit Player edits a COPY of the player (0x015DD520; [015DD518] = the copy,  */
+/* [015DD51C] = the roster's own record). "Accept" copies it back (call at 0x00501F07); backing out   */
+/* ("You are about to lose any changes ...") does not. Hair Style / Short Length / Wingspan follow it:*/
+/* a change made on the copy is TENTATIVE - it goes into the save journal (pend_write) only when the  */
+/* game copies the player back, and is undone when the next player is opened, the roster is saved or */
+/* loaded without that. MyPLAYER (edited in place, no copy) keeps the old way.                       */
+/* ------------------------------------------------------------------------------------------ */
+#define ES_EDITPTR 0x015DD518u
+#define ES_REALPTR 0x015DD51Cu
+#define ES_COPY    0x015DD520u
+#define ES_MAX     256
+enum { ES_HAIR = 0, ES_SL = 1, ES_WS = 2 };
+typedef struct { u8 kind; u32 key; int oldv; char oldtag[48]; } EsUndo;
+static EsUndo g_esU[ES_MAX]; static int g_nesU;
+static PendW  g_esW[ES_MAX]; static int g_nesW;
+static int g_esHooks;                           /* both game sites hooked */
+static int ws_get(u32 cfid); static int sl_get(u32 cfid); static const char *hair_sel_get(u32 cfid);
+static int es_on(void)                          /* Edit Player is editing a copy right now */
+{
+    u32 e = 0, r = 0;
+    if (!g_esHooks || g_is2k12) return 0;
+    if (!read32(ES_EDITPTR, &e) || !read32(ES_REALPTR, &r)) return 0;
+    return e == ES_COPY && r != 0;
+}
+/* call BEFORE the value changes: remembers what it was when the player was opened */
+static void es_remember(int kind, u32 key)
+{
+    int i; EsUndo u;
+    if (!es_on() || !key) return;
+    u.kind = (u8)kind; u.key = key; u.oldv = 5; u.oldtag[0] = 0;
+    if (kind == ES_WS) u.oldv = ws_get(key);
+    else if (kind == ES_SL) u.oldv = sl_get(key);
+    else s_cpy(u.oldtag, hair_sel_get(key), 48);
+    pend_lock();
+    for (i = 0; i < g_nesU; i++) if (g_esU[i].kind == kind && g_esU[i].key == key) break;
+    if (i == g_nesU && g_nesU < ES_MAX) g_esU[g_nesU++] = u;
+    pend_unlock();
+}
+/* instead of pend_write for Edit Player rows */
+static void edit_write(const char *sec, const char *key, const char *val)
+{
+    int s, i;
+    if (!es_on()) { pend_write(sec, key, val); return; }
+    s = sec[0] == 'H' ? 0 : sec[0] == 'S' ? 1 : 2;
+    pend_lock();
+    for (i = 0; i < g_nesW; i++) if (g_esW[i].sec == s && s_ieq(g_esW[i].key, key)) break;
+    if (i == g_nesW) {
+        if (g_nesW >= ES_MAX) { pend_unlock(); pend_write(sec, key, val); return; }
+        g_nesW++;
+    }
+    g_esW[i].sec = (u8)s; s_cpy(g_esW[i].key, key, 12);
+    g_esW[i].del = val ? 0 : 1; s_cpy(g_esW[i].val, val ? val : "", 112);
+    pend_unlock();
+}
+/* the game accepted the player: his tentative changes join the save journal */
+static int es_accept(void)
+{
+    static PendW cp[ES_MAX]; int n, i;
+    pend_lock(); n = g_nesW; for (i = 0; i < n; i++) cp[i] = g_esW[i]; g_nesW = 0; g_nesU = 0; pend_unlock();
+    for (i = 0; i < n; i++) pend_write(k_pendSec[cp[i].sec], cp[i].key, cp[i].del ? NULL : cp[i].val);
+    return n;
+}
+static int es_undo(void);                       /* roster.inc: puts the remembered values back */

@@ -210,6 +210,7 @@ static int hair_step(u8 *rec, int dir)
     int cur, n;
     char tag[HAIR_TAG_LEN], key[12];
     if (!cfid) return 0;
+    es_remember(ES_HAIR, cfid);                /* 2.0 fix: undone if Edit Player is left without accepting */
     EnterCriticalSection(&g_hairLock);
     g_hairCache[0].tick = g_hairCache[1].tick = g_hairCache[2].tick = g_hairCache[3].tick = 0;   /* re-read the folder */
     L = hair_list(cfid);
@@ -221,7 +222,7 @@ static int hair_step(u8 *rec, int dir)
     LeaveCriticalSection(&g_hairLock);
     u32_to_dec(cfid, key);
     { char v[HAIR_TAG_LEN + 48]; val_named(v, sizeof(v), tag, cfid, hair_edit_rec(rec));
-      pend_write("Hair", key, tag[0] ? v : NULL); }   /* 2.1: written when the game saves */
+      edit_write("Hair", key, tag[0] ? v : NULL); }   /* 2.1: written when the game saves (2.0 fix: once accepted) */
     hair_png_entry_update(cfid, tag);
     st_hairChanges++;
     blog("HAIR STYLE   CFID %u -> %s  (%s)", cfid, tag[0] ? tag : cfg_hairOriginal,

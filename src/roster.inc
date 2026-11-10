@@ -77,6 +77,74 @@ static void roster_migrate_old(const char *into)
     if (moved) blog("ROSTER  %d saved choice(s) from the old BodyHook_Hair / Shorts / Wingspan.ini moved into %s (old files kept as *.ini.old)", moved, into);
 }
 
+/* 2.0 fix: Edit Player was left without accepting -> the remembered values go back (see roster_key.inc) */
+static int es_undo(void)
+{
+    static EsUndo cp[ES_MAX]; int n, i;
+    pend_lock(); n = g_nesU; for (i = 0; i < n; i++) cp[i] = g_esU[i]; g_nesU = 0; g_nesW = 0; pend_unlock();
+    for (i = 0; i < n; i++) {
+        u32 k = cp[i].key;
+        if (cp[i].kind == ES_WS) {
+            if (g_wsReady) EnterCriticalSection(&g_wsLock);
+            ws_set(k, cp[i].oldv);
+            if (g_wsReady) LeaveCriticalSection(&g_wsLock);
+        } else if (cp[i].kind == ES_SL) {
+            EnterCriticalSection(&g_slLock); sl_set(k, cp[i].oldv); sl_live(k, cp[i].oldv); LeaveCriticalSection(&g_slLock);
+        } else {
+            EnterCriticalSection(&g_hairLock);
+            hair_sel_set(k, cp[i].oldtag);
+            g_hairCache[0].tick = g_hairCache[1].tick = g_hairCache[2].tick = g_hairCache[3].tick = 0;
+            LeaveCriticalSection(&g_hairLock);
+            hair_png_entry_update(k, cp[i].oldtag);
+            hair_live_queue(k);
+        }
+    }
+    return n;
+}
+typedef void *(__fastcall *EsCopy_t)(void *dst, const void *src, u32 n);
+static EsCopy_t g_esCopy = (EsCopy_t)0x00D958B0u;
+/* 0x00501F07: Edit Player "Accept" copies the edited copy back into the roster's player */
+void *__fastcall EsAcceptCopy(void *dst, const void *src, u32 n)
+{
+    void *r = g_esCopy(dst, src, n);
+    int k = es_accept();
+    if (k) blog("EDIT PLAYER  player accepted: %d Hair Style / Short Length / Wingspan change(s) kept (written when the game saves)", k);
+    return r;
+}
+/* 0x005042A8: Edit Player opens a player (copies him into the edit copy): what the last one did not accept goes */
+void *__fastcall EsOpenCopy(void *dst, const void *src, u32 n)
+{
+    int k = es_undo();
+    if (k) blog("EDIT PLAYER  left without accepting: %d Hair Style / Short Length / Wingspan change(s) undone", k);
+    return g_esCopy(dst, src, n);
+}
+static DWORD WINAPI es_thread(LPVOID unused)    /* Edit Player left (no copy any more) without accepting */
+{
+    int off = 0;
+    (void)unused;
+    for (;;) {
+        Sleep(200);
+        if (!g_nesU || es_on()) { off = 0; continue; }
+        if (++off < 2) continue;
+        { int k = es_undo(); if (k) blog("EDIT PLAYER  left without accepting: %d Hair Style / Short Length / Wingspan change(s) undone", k); }
+        off = 0;
+    }
+}
+static void install_editsession(void)
+{
+    if (g_is2k12) return;
+    if (!hair_bytes(0x00501EF6u, "8B 15 18 D5 5D 01 8B 0D 1C D5 5D 01 68 E4 01 00 00 E8") || call_target_of(0x00501F07u) != 0x00D958B0u ||
+        !hair_bytes(0x00504290u, "B9 20 D5 5D 01 68 E4 01 00 00 8B D6") || call_target_of(0x005042A8u) != 0x00D958B0u) {
+        blog("WARNING Edit Player accept / open: game code not as expected - Hair Style / Short Length / Wingspan changes are kept even when a player is not accepted");
+        return;
+    }
+    if (!patch_call(0x00501F07u, (u32)&EsAcceptCopy)) { blog("WARNING Edit Player accept could not be hooked"); return; }
+    if (!patch_call(0x005042A8u, (u32)&EsOpenCopy)) { patch_call(0x00501F07u, 0x00D958B0u); blog("WARNING Edit Player open could not be hooked"); return; }
+    g_esHooks = 1;
+    CreateThread(NULL, 0, es_thread, NULL, 0, NULL);
+    blog("EDIT PLAYER  Hair Style / Short Length / Wingspan follow Accept: kept when the player is accepted (00501F07), undone when he is not (005042A8 / leaving)");
+}
+
 /* (re)read everything from g_rosterIni */
 static void roster_reload(void)
 {
@@ -107,6 +175,7 @@ static void roster_load(const char *key)
     char path[MAX_PATH];
     roster_path(key, path);
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES && key[0] != '(' && !roster_any_file()) roster_migrate_old(path);
+    es_undo();                  /* 2.0 fix: changes of a player that was not accepted */
     {   int nd = pend_drop();   /* 2.1: not saved by the game -> gone (roster_reload reads the file's values) */
         if (nd) blog("ROSTER  %d Edit Player change(s) not saved by the game - dropped (loading \"%s\")", nd, key); }
     s_cpy(g_rosterKey, key, sizeof(g_rosterKey));
@@ -118,6 +187,7 @@ static void roster_load(const char *key)
 static void roster_saveas(const char *key)
 {
     char path[MAX_PATH]; int n;
+    { int u = es_undo(); if (u) blog("EDIT PLAYER  %d change(s) of a player that was not accepted undone before the save", u); }   /* 2.0 fix */
     if (s_ieq(key, g_rosterKey)) {          /* 2.1: the game saved this roster -> the Edit Player changes are written now */
         n = pend_commit(g_rosterIni);
         if (n) blog("ROSTER  game saved \"%s\": %d Edit Player change(s) written", key, n);

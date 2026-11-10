@@ -21,7 +21,10 @@ NEW IN 2.0
   * SAVES WITH THE GAME - those Edit Player choices are written when the
     GAME saves the roster / save file, like the game's own Edit Player
     values: load a roster or quit without saving and they are gone. The new
-    value still shows and plays right away. (NBA 2K12: written right away.)
+    value still shows and plays right away. They also follow Edit Player's
+    Accept: leave a player without accepting ("lose any changes") and his
+    Hair Style / Short Length / Wingspan go back too. (NBA 2K12: written
+    right away.)
   * EDIT PLAYER CAMERA - each preview camera view can be zoomed and lifted
     ([EditPlayerCamera]); the ini is re-read while the game runs.
   * HAIR STYLE LIVE REFRESH - picking a hair style rebuilds the preview
