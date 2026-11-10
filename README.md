@@ -4,13 +4,13 @@ BodyHook gives every player his own body, leg tattoos, jersey/shorts models and 
 textures from his cyberface file (`pngXXXX.iff`), and adds **Hair Style**, **Short Length** and
 **Wingspan** rows to Edit Player, saved per roster when the game saves the roster. It is a [SLAM](https://github.com/Dokitooo/SLAM) mod.
 
-**Download:** [BodyHook.zip](https://github.com/Dokitooo/BodyHook/releases/latest/download/BodyHook.zip) (latest release) · [changelog](CHANGELOG.md) ·
+**Download:** [BodyHook_v2.0.zip](https://github.com/Dokitooo/BodyHook/releases/download/v2.0/BodyHook_v2.0.zip) (latest release) · [changelog](CHANGELOG.md) ·
 [all releases](https://github.com/Dokitooo/BodyHook/releases)
 
 ## Requirements
 
 - NBA 2K14 PC (also runs on the supported NBA 2K12 builds, see `package/COMPATIBILITY.txt`)
-- [SLAM](https://github.com/Dokitooo/SLAM/releases/latest/download/SLAM.zip) 1.0.0 or newer
+- [SLAM](https://github.com/Dokitooo/SLAM/releases/download/v1.0.0/SLAM_v1.0.0.zip) 1.0.0 or newer
 
 ## Install
 
@@ -42,7 +42,7 @@ custom-content reference is [`package/CHEATSHEET.txt`](package/CHEATSHEET.txt).
 
 From an *x86 Native Tools Command Prompt for VS*: `build\build_msvc.bat`, or on Linux with
 clang-cl + lld-link: `build/build_linux_clang.sh`. Output: `bin\BodyHook.asi`.
-`build/build_plain.sh` builds a plain `.asi` for any ASI loader (also attached to each release as `BodyHook-plain.zip`). `src/bodyhook.rc` is an optional version resource.
+`build/build_plain.sh` builds a plain `.asi` for any ASI loader (also attached to each release as `BodyHook_v2.0_plain.zip`). `src/bodyhook.rc` is an optional version resource.
 
 ## Verify your download
 
@@ -50,7 +50,7 @@ Every release lists the SHA-256 of each zip in `SHA256SUMS.txt` (also attached t
 Compare it with the hash of the file you downloaded:
 
 ```powershell
-Get-FileHash .\BodyHook.zip -Algorithm SHA256
+Get-FileHash .\BodyHook_v2.0.zip -Algorithm SHA256
 ```
 
 ```bash
