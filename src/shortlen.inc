@@ -528,8 +528,8 @@ static void gen_claim(u32 key, u8 *rec)
         key_str(key, ks);
         blog("roster ID %s now holds %s (was %s): his old Short Length / Wingspan dropped", ks + 1, nm, saved);
         EnterCriticalSection(&g_slLock); sl_set(key, 5); LeaveCriticalSection(&g_slLock);
-        WritePrivateProfileStringA("ShortLength", ks, NULL, g_rosterIni);
-        ws_set(key, 5); WritePrivateProfileStringA("Wingspan", ks, NULL, g_rosterIni);
+        pend_write("ShortLength", ks, NULL);
+        ws_set(key, 5); pend_write("Wingspan", ks, NULL);
     }
     gn_set(key & 0xFFFF, nm);
 }
@@ -582,7 +582,7 @@ static int sl_step(u8 *rec, int dir)
     key_str(cfid, key);
     u32_to_dec((u32)now, val);
     val_named(v, sizeof(v), val, cfid, sl_rec(rec));
-    WritePrivateProfileStringA("ShortLength", key, now == 5 ? NULL : v, g_slIni);
+    pend_write("ShortLength", key, now == 5 ? NULL : v);   /* 2.1: written when the game saves */
     return 1;
 }
 int __fastcall SlNext(u8 *rec, u32 unused) { (void)unused; return sl_step(rec, +1); }

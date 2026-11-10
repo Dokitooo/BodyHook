@@ -2,7 +2,7 @@
 
 BodyHook gives every player his own body, leg tattoos, jersey/shorts models and accessory
 textures from his cyberface file (`pngXXXX.iff`), and adds **Hair Style**, **Short Length** and
-**Wingspan** rows to Edit Player, saved per roster. It is a [SLAM](https://github.com/Dokitooo/SLAM) mod.
+**Wingspan** rows to Edit Player, saved per roster when the game saves the roster. It is a [SLAM](https://github.com/Dokitooo/SLAM) mod.
 
 **Download:** [BodyHook.zip](https://github.com/Dokitooo/BodyHook/releases/latest/download/BodyHook.zip) (latest release) · [changelog](CHANGELOG.md) ·
 [all releases](https://github.com/Dokitooo/BodyHook/releases)
@@ -42,7 +42,7 @@ custom-content reference is [`package/CHEATSHEET.txt`](package/CHEATSHEET.txt).
 
 From an *x86 Native Tools Command Prompt for VS*: `build\build_msvc.bat`, or on Linux with
 clang-cl + lld-link: `build/build_linux_clang.sh`. Output: `bin\BodyHook.asi`.
-`build/build_plain.sh` builds a plain `.asi` for any ASI loader. `src/bodyhook.rc` is an optional version resource.
+`build/build_plain.sh` builds a plain `.asi` for any ASI loader (also attached to each release as `BodyHook-plain.zip`). `src/bodyhook.rc` is an optional version resource.
 
 ## Verify your download
 

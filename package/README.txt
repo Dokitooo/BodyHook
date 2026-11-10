@@ -7,7 +7,7 @@ NEW IN 2.0
 ----------
   * SLAM mod: BodyHook now runs under SLAM (the NBA 2K14 mod loader) with its
     own folder SLAM\BodyHook\ (asi, ini, log, rosters\). A plain .asi for any
-    ASI loader can be built from the source (build/build_plain.sh).
+    ASI loader is included too.
   * SHORT LENGTH - Edit Player > Body and Head has a "Short Length" row
     (0 shortest .. 10 longest, 5 = the shorts as your cloth file has them).
     Per player, used everywhere (menus, games, replays). Needs MOVING
@@ -16,8 +16,12 @@ NEW IN 2.0
     arms): upper arm and forearm get longer or shorter, the hands keep their
     shape, the ball stays in his hands.
   * PER-ROSTER SETTINGS - Hair Style, Short Length and Wingspan choices are
-    saved per roster in BodyHook\rosters\<roster>.ini; saving the roster
-    under a new name copies them along.
+    saved per roster in BodyHook\rosters\<roster>.ini (when the game saves
+    the roster); saving the roster under a new name copies them along.
+  * SAVES WITH THE GAME - those Edit Player choices are written when the
+    GAME saves the roster / save file, like the game's own Edit Player
+    values: load a roster or quit without saving and they are gone. The new
+    value still shows and plays right away. (NBA 2K12: written right away.)
   * EDIT PLAYER CAMERA - each preview camera view can be zoomed and lifted
     ([EditPlayerCamera]); the ini is re-read while the game runs.
   * HAIR STYLE LIVE REFRESH - picking a hair style rebuilds the preview
@@ -40,14 +44,13 @@ NEW IN 2.0
 
 INSTALL
 -------
-SLAM (recommended): extract the zip into the game folder (it holds SLAM\BodyHook\)
+SLAM (recommended): copy SLAM\BodyHook\ into the game's SLAM folder
   (needs SLAM 1.0: the SLAM folder + dinput8.dll in the nba2k14.exe folder).
   Log: SLAM\BodyHook\BodyHook.log
 
-Plain .asi (any ASI loader, no SLAM; not in the download, build it from the
-  source with build/build_plain.sh): put BodyHook.asi where your loader reads
-  .asi files (game folder or scripts\) and a BodyHook\ folder (BodyHook.ini)
-  next to it. Log: BodyHook\BodyHook.log
+Plain .asi (any ASI loader, no SLAM): put plain\BodyHook.asi where your loader
+  reads .asi files (game folder or scripts\) and the plain\BodyHook\ folder
+  (BodyHook.ini) next to it. Log: BodyHook\BodyHook.log
   Use ONE of the two, not both.
 
 Already using BodyHook? Keep your own BodyHook.ini and rosters\ folder.
@@ -117,7 +120,7 @@ one that switches between whole copies of the player's png:
   4. The preview updates right away (LiveRefresh=1); games, menus and
      replays always load the chosen file.
 
-The choice is saved per CFID and per roster in BodyHook\rosters\<roster>.ini,
+The choice is saved (when the game saves the roster) per CFID and per roster in BodyHook\rosters\<roster>.ini,
 so it stays after restarting the game and does not change your roster.
 Pick Original to go back to png<CFID>.iff.
 Each variant is a full cyberface, so it can also carry its own body,

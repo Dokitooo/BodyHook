@@ -229,7 +229,7 @@ EXAMPLE  (png0195.iff after editing)
   png19600_hair1.iff     <- shows as "hair1"
   png19600_anyname.iff   <- shows as "anyname"
   Edit Player > Body & Head > Hair Style (regular players only, below Height/Weight).
-  Pick one, then back out and reopen the player to see it. Saved per roster in BodyHook\rosters\<roster>.ini
+  Pick one, then back out and reopen the player to see it. Saved (when the game saves the roster) per roster in BodyHook\rosters\<roster>.ini
   (kept after restarting the game).
 
 

@@ -221,7 +221,7 @@ static int hair_step(u8 *rec, int dir)
     LeaveCriticalSection(&g_hairLock);
     u32_to_dec(cfid, key);
     { char v[HAIR_TAG_LEN + 48]; val_named(v, sizeof(v), tag, cfid, hair_edit_rec(rec));
-      WritePrivateProfileStringA("Hair", key, tag[0] ? v : NULL, g_hairIni); }
+      pend_write("Hair", key, tag[0] ? v : NULL); }   /* 2.1: written when the game saves */
     hair_png_entry_update(cfid, tag);
     st_hairChanges++;
     blog("HAIR STYLE   CFID %u -> %s  (%s)", cfid, tag[0] ? tag : cfg_hairOriginal,

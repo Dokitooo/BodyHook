@@ -148,3 +148,44 @@ static void val_split(char *v, u32 key)
         return;
     }
 }
+
+/* ------------------------------------------------------------------------------------------ */
+/* 2.1 / TESTBUILD 1.11.31: SAVE WITH THE GAME (user 2026-11-10, like Borderless' Window Mode)   */
+/* A change in Edit Player (Hair Style, Short Length, Wingspan) is no longer written right away: */
+/* it is kept here and written into rosters\<roster>.ini when the GAME saves the roster / save    */
+/* file (.ROS / .CMG / .FRA opened for writing, or renamed to that name). Loading a roster / save */
+/* drops the changes the game did not save (their values come back from the file), and quitting */
+/* without saving loses them - like the game's own Edit Player changes. The value shows / plays  */
+/* at once as before. If the roster files cannot be followed (import hooks missing) it is written */
+/* right away as before.                                                                         */
+/* ------------------------------------------------------------------------------------------ */
+#define PEND_MAX 2048
+typedef struct { u8 sec, del; char key[12]; char val[112]; } PendW;
+static PendW g_pendw[PEND_MAX]; static int g_npendw; static volatile long g_pendLock;
+static int g_rosterOn;
+static const char *const k_pendSec[3] = { "Hair", "ShortLength", "Wingspan" };
+static void pend_lock(void)   { while (__sync_lock_test_and_set(&g_pendLock, 1)) Sleep(0); }
+static void pend_unlock(void) { __sync_lock_release(&g_pendLock); }
+static void pend_write(const char *sec, const char *key, const char *val)
+{
+    int s, i;
+    if (!g_rosterOn || g_is2k12) { WritePrivateProfileStringA(sec, key, val, g_rosterIni); return; }   /* NBA 2K12: its roster saves are not followed - right away as before */
+    s = sec[0] == 'H' ? 0 : sec[0] == 'S' ? 1 : 2;
+    pend_lock();
+    for (i = 0; i < g_npendw; i++) if (g_pendw[i].sec == s && s_ieq(g_pendw[i].key, key)) break;
+    if (i == g_npendw) {
+        if (g_npendw >= PEND_MAX) { pend_unlock(); WritePrivateProfileStringA(sec, key, val, g_rosterIni); return; }   /* (2048 changes) */
+        g_npendw++;
+    }
+    g_pendw[i].sec = (u8)s; s_cpy(g_pendw[i].key, key, 12);
+    g_pendw[i].del = val ? 0 : 1; s_cpy(g_pendw[i].val, val ? val : "", 112);
+    pend_unlock();
+}
+static int pend_commit(const char *path)            /* the game saved: write the changes into that roster's file */
+{
+    static PendW cp[PEND_MAX]; int n, i;
+    pend_lock(); n = g_npendw; for (i = 0; i < n; i++) cp[i] = g_pendw[i]; g_npendw = 0; pend_unlock();
+    for (i = 0; i < n; i++) WritePrivateProfileStringA(k_pendSec[cp[i].sec], cp[i].key, cp[i].del ? NULL : cp[i].val, path);
+    return n;
+}
+static int pend_drop(void) { int n; pend_lock(); n = g_npendw; g_npendw = 0; pend_unlock(); return n; }

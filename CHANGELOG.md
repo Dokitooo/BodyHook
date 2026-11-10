@@ -7,6 +7,7 @@
 - **Short Length:** a "Short Length" row in Edit Player > Body and Head (0 shortest to 10 longest). Per player, used everywhere. Needs moving `cloth_shorts`.
 - **Wingspan:** a "Wingspan" row (0 to 10, 5 = his own arms). Upper arm and forearm get longer or shorter; the hands keep their shape and the ball stays in his hands.
 - **Choices saved per roster file:** Hair Style, Short Length and Wingspan are kept in `SLAM\BodyHook\rosters\<roster>.ini`.
+- **Saved with the game:** those Edit Player choices are written when the game saves the roster or save file, like the game's own Edit Player values. Load a roster or quit without saving and they are gone. The new value still shows and plays right away.
 - **Edit Player camera:** each preview camera view can be zoomed and lifted (`[EditPlayerCamera]`).
 - **Freestyle practice passers:** in Freestyle practice one or two players rebound and pass to you (pass modifier + shoot = alley-oop).
 - **Moving cloth in practice and on the bench:** every player gets his own jersey/shorts cloth, so shorts no longer disappear or swap sizes.

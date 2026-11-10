@@ -18,7 +18,7 @@ typedef BOOL (WINAPI *RosterMF_t)(LPCSTR, LPCSTR);
 static RosterRF_t g_rosterRF; static RosterCH_t g_rosterCH; static RosterMF_t g_rosterMF;
 static struct { HANDLE h; u32 bytes; int done; char key[96]; } g_rosterTr[16];
 static volatile long g_rosterTrLock;
-static int g_rosterOn = 0;
+static int g_rosterOn;   /* (declared in roster_key.inc) */
 #define ROSTER_LOAD_BYTES (256u * 1024u)
 
 static void rt_lock(void)   { while (__sync_lock_test_and_set(&g_rosterTrLock, 1)) Sleep(0); }
@@ -107,6 +107,8 @@ static void roster_load(const char *key)
     char path[MAX_PATH];
     roster_path(key, path);
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES && key[0] != '(' && !roster_any_file()) roster_migrate_old(path);
+    {   int nd = pend_drop();   /* 2.1: not saved by the game -> gone (roster_reload reads the file's values) */
+        if (nd) blog("ROSTER  %d Edit Player change(s) not saved by the game - dropped (loading \"%s\")", nd, key); }
     s_cpy(g_rosterKey, key, sizeof(g_rosterKey));
     s_cpy(g_rosterIni, path, MAX_PATH);
     roster_reload();
@@ -115,12 +117,17 @@ static void roster_load(const char *key)
 }
 static void roster_saveas(const char *key)
 {
-    char path[MAX_PATH];
-    if (s_ieq(key, g_rosterKey)) return;
+    char path[MAX_PATH]; int n;
+    if (s_ieq(key, g_rosterKey)) {          /* 2.1: the game saved this roster -> the Edit Player changes are written now */
+        n = pend_commit(g_rosterIni);
+        if (n) blog("ROSTER  game saved \"%s\": %d Edit Player change(s) written", key, n);
+        return;
+    }
     roster_path(key, path);
     if (GetFileAttributesA(g_rosterIni) != INVALID_FILE_ATTRIBUTES) CopyFileA(g_rosterIni, path, FALSE);
     else DeleteFileA(path);
-    blog("ROSTER  saved as \"%s\": rosters\\%s.ini (choices of \"%s\" copied)", key, key, g_rosterKey);
+    n = pend_commit(path);                   /* 2.1: plus the changes not saved before */
+    blog("ROSTER  saved as \"%s\": rosters\\%s.ini (choices of \"%s\" copied, %d new change(s))", key, key, g_rosterKey, n);
     s_cpy(g_rosterKey, key, sizeof(g_rosterKey));
     s_cpy(g_rosterIni, path, MAX_PATH);
 }
