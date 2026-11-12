@@ -38,15 +38,21 @@ static void nc_note(u32 inst)   /* a player's jersey / shorts cloth instance (fr
  * shorts array x12) or one Short Length knows (copies / built shorts) - in practice the outfit draw does not always
  * see the user's cloth, so it was solved as a net (exe value) and Short Length looked wrong there */
 static int nc_mesh_scan(u32 m);
+/* 2.1: was 16 entries cleared every second - with more than 16 cloths in a game (10 players x jersey + shorts, nets,
+ * bench) the rest were searched in full on every solver call. Now 256 entries (ClothMesh + answer in one 32-bit word,
+ * so solver threads never read half an entry), each kept 1 s. */
+#define NC_MC 256
+static volatile u32 g_ncMc[NC_MC], g_ncMcT[NC_MC];
 static int nc_mesh_garment(u32 m)   /* cached per ClothMesh for 1 s (the solver asks many times a frame) */
 {
-    static u32 cm[16], cr[16], ct; static int cn; DWORD t = GetTickCount(); int i;
+    u32 h, e, t = GetTickCount(); int r;
     if (!m) return 0;
-    if (t - ct > 1000) { ct = t; cn = 0; }
-    for (i = 0; i < cn; i++) if (cm[i] == m) return (int)cr[i];
-    i = nc_mesh_scan(m);
-    if (cn < 16) { cm[cn] = m; cr[cn] = (u32)i; cn++; }
-    return i;
+    h = ((m >> 4) * 2654435761u) >> 24;                /* 0..255 */
+    e = g_ncMc[h];
+    if ((e & ~3u) == (m & ~3u) && t - g_ncMcT[h] < 1000) return (int)(e & 1);
+    r = nc_mesh_scan(m);
+    g_ncMcT[h] = t; g_ncMc[h] = (m & ~3u) | (u32)(r ? 1 : 0);
+    return r;
 }
 static int nc_mesh_scan(u32 m)
 {

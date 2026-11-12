@@ -1,7 +1,25 @@
 ===============================================================================
-  BodyHook 2.0  -  Per-player bodies, tattoos, uniforms and accessories
+  BodyHook 2.1  -  Per-player bodies, tattoos, uniforms and accessories
                    for NBA 2K14 PC
 ===============================================================================
+
+NEW IN 2.1  (smoother - nothing removed, nothing looks different)
+----------
+  * LESS STUTTER: BodyHook builds its own jersey/shorts cloth for some players
+    (bench, practice, players drawn with cloth of another body size). Each
+    build takes the game 10-25 ms, and it happened while a frame was being
+    drawn - several players at once could freeze a frame for ~60 ms. Now at
+    most one player is built per frame; the others keep the game's cloth for
+    a frame or two (not visible).
+  * NO REBUILDS: a player who comes back with the same body and uniform gets
+    the cloth BodyHook already made for him again instead of a new build.
+  * Cloth builds no longer hold the lock the other BodyHook hooks use, so
+    nothing else waits behind a build.
+  * Long-net exes: the cloth-size check the cloth solver runs many times a
+    frame keeps 256 answers instead of 16 (no more full searches).
+  * BodyHook.log PERF lines also show "draw guards" and "own cloth builds",
+    and how many builds waited a frame / were reused.
+  BodyHook.ini is unchanged - your 2.0 ini keeps working.
 
 NEW IN 2.0
 ----------

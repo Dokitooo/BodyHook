@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1
+
+Smoother. Nothing removed, nothing looks different.
+
+- **Less stutter:** BodyHook builds its own jersey and shorts cloth for some players (bench, practice, players drawn with cloth of another body size). Each build takes the game 10-25 ms and ran while a frame was drawn, so several players at once could freeze a frame for about 60 ms. Now at most one player is built per frame; the others keep the game's cloth for a frame or two.
+- **No rebuilds:** a player who comes back with the same body and uniform gets the cloth BodyHook already made for him.
+- Cloth builds no longer hold the lock the other BodyHook hooks use.
+- **Long-net exes:** the cloth-size check keeps 256 answers instead of 16.
+- `BodyHook.log` PERF lines also show "draw guards" and "own cloth builds", and how many builds waited a frame or were reused.
+- `BodyHook.ini` is unchanged: your 2.0 ini keeps working.
+
 ## 2.0
 
 - **Runs under [SLAM](https://github.com/Dokitooo/SLAM)**, in its own folder `SLAM\BodyHook\` (asi, ini, log, `rosters\`).

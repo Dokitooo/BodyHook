@@ -1,16 +1,16 @@
-# BodyHook 2.0 — per-player bodies for NBA 2K14 (PC)
+# BodyHook 2.1 — per-player bodies for NBA 2K14 (PC)
 
 BodyHook gives every player his own body, leg tattoos, jersey/shorts models and accessory
 textures from his cyberface file (`pngXXXX.iff`), and adds **Hair Style**, **Short Length** and
 **Wingspan** rows to Edit Player, saved per roster when the game saves the roster. It is a [SLAM](https://github.com/Dokitooo/SLAM) mod.
 
-**Download:** [BodyHook_v2.0.zip](https://github.com/Dokitooo/BodyHook/releases/download/v2.0/BodyHook_v2.0.zip) (latest release) · [changelog](CHANGELOG.md) ·
+**Download:** [BodyHook_v2.1.zip](https://github.com/Dokitooo/BodyHook/releases/download/v2.1/BodyHook_v2.1.zip) (latest release) · [changelog](CHANGELOG.md) ·
 [all releases](https://github.com/Dokitooo/BodyHook/releases)
 
 ## Requirements
 
 - NBA 2K14 PC (also runs on the supported NBA 2K12 builds, see `package/COMPATIBILITY.txt`)
-- [SLAM](https://github.com/Dokitooo/SLAM/releases/download/v1.0.0/SLAM_v1.0.0.zip) 1.0.0 or newer
+- [SLAM](https://github.com/Dokitooo/SLAM/releases/latest) 1.0.0 or newer
 
 ## Install
 
@@ -22,7 +22,7 @@ textures from his cyberface file (`pngXXXX.iff`), and adds **Hair Style**, **Sho
    SLAM\BodyHook\BodyHook.asi
    SLAM\BodyHook\BodyHook.ini
    ```
-4. Start the game. The mod list at the top left shows `BodyHook 2.0   SLAM`.
+4. Start the game. The mod list at the top left shows `BodyHook 2.1   SLAM`.
 
 The log is `SLAM\BodyHook\BodyHook.log`. Per-roster choices (hair, shorts, wingspan) live in
 `SLAM\BodyHook\rosters\`. The full manual is [`package/README.txt`](package/README.txt); the
@@ -42,7 +42,7 @@ custom-content reference is [`package/CHEATSHEET.txt`](package/CHEATSHEET.txt).
 
 From an *x86 Native Tools Command Prompt for VS*: `build\build_msvc.bat`, or on Linux with
 clang-cl + lld-link: `build/build_linux_clang.sh`. Output: `bin\BodyHook.asi`.
-`build/build_plain.sh` builds a plain `.asi` for any ASI loader (also attached to each release as `BodyHook_v2.0_plain.zip`). `src/bodyhook.rc` is an optional version resource.
+`build/build_plain.sh` builds a plain `.asi` for any ASI loader (also attached to each release as `BodyHook_v2.1_plain.zip`). `src/bodyhook.rc` is an optional version resource.
 
 ## Verify your download
 
@@ -50,7 +50,7 @@ Every release lists the SHA-256 of each zip in `SHA256SUMS.txt` (also attached t
 Compare it with the hash of the file you downloaded:
 
 ```powershell
-Get-FileHash .\BodyHook_v2.0.zip -Algorithm SHA256
+Get-FileHash .\BodyHook_v2.1.zip -Algorithm SHA256
 ```
 
 ```bash

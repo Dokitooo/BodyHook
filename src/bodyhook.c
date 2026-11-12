@@ -36,7 +36,7 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
-#define BODYHOOK_VERSION "2.0"
+#define BODYHOOK_VERSION "2.1"
 #include "slam_mod.h"   /* SLAM mod: slam_glue.c has DllMain + SlamModStart, this file starts in mod_start() */
 
 /* ------------------------------------------------------------------------------------------ */
@@ -236,6 +236,7 @@ static u32      cfg_recordSize = 0x298;
 /* logging                                                                                    */
 /* ------------------------------------------------------------------------------------------ */
 static CRITICAL_SECTION g_logLock;
+static CRITICAL_SECTION g_clothLock;   /* 2.1: BodyHook's own cloth builds (10-25 ms) no longer hold the data lock (g_logLock) */
 static HANDLE g_logFile = INVALID_HANDLE_VALUE;
 
 /* PERF (1.11.13 / 1.19.2): the log is written by its own thread. A hook only copies its line into
@@ -365,8 +366,9 @@ static void blog(const char *fmt, ...)
 /* ------------------------------------------------------------------------------------------ */
 /* per-hook timing (QueryPerformanceCounter, microseconds)                                    */
 /* ------------------------------------------------------------------------------------------ */
-enum { T_BODY, T_LEGS, T_UNIFORM, T_SIM, T_ACC, T_COMBO, T_BENCH, T_COUNT };
-static const char *kTimeNames[T_COUNT] = { "body", "legs", "uniform", "cloth-sim", "accessory", "acc-combo", "bench (incl. the game's own bench drawing)" };
+enum { T_BODY, T_LEGS, T_UNIFORM, T_SIM, T_ACC, T_COMBO, T_BENCH, T_GUARD, T_BUILD, T_COUNT };
+static const char *kTimeNames[T_COUNT] = { "body", "legs", "uniform", "cloth-sim", "accessory", "acc-combo", "bench (incl. the game's own bench drawing)",
+    "draw guards", "own cloth builds" };   /* 2.1: the draw-time work and BodyHook's own cloth builds are timed too */
 static volatile u32 g_tCalls[T_COUNT], g_tUs[T_COUNT];
 static u32 g_qpcPerUs = 0;
 static u32 g_slowLogged = 0;
@@ -390,9 +392,27 @@ static void t_done(int slot, u32 start)
     g_tCalls[slot]++;
     if (cfg_log && us >= 3000 && g_slowLogged < 40) {
         g_slowLogged++;
-        blog("SLOW     %s hook took %u ms (usually this is the game loading data, not BodyHook)", kTimeNames[slot], us / 1000);
+        if (slot >= T_GUARD) blog("SLOW     %s took %u ms", kTimeNames[slot], us / 1000);
+        else blog("SLOW     %s hook took %u ms (usually this is the game loading data, not BodyHook)", kTimeNames[slot], us / 1000);
     }
 }
+
+/* 2.1 (frame drops / stutter): BodyHook builds its own jersey / shorts cloth objects (bench, own cloth, static guard)
+ * INSIDE the draw call - one build is the game's cloth builder, 10-12 ms, two per player. A log (97d4a686) showed three
+ * players built in the same frame (~60 ms hitch) and the same players again 0.6-2 s later. Now a build that can wait
+ * (the player keeps the cloth the game gave him for a few frames) waits until 14 ms after the last one ended: at most
+ * one player per frame. Builds that can't wait (no cloth at all otherwise) are never held back. */
+#define CLOTH_BUILD_GAP_US 14000u
+static volatile u32 g_buildLastQ = 0;
+static volatile u32 st_buildWaits = 0, st_clothRevived = 0;
+static int cloth_budget_ok(void)
+{
+    u32 q = t_now();
+    if (!g_qpcPerUs) { LARGE_INTEGER f; f.LowPart = 0; f.HighPart = 0; QueryPerformanceFrequency(&f); g_qpcPerUs = f.LowPart >= 1000000u ? f.LowPart / 1000000u : 1; }
+    if (g_buildLastQ && (q - g_buildLastQ) / g_qpcPerUs < CLOTH_BUILD_GAP_US) { st_buildWaits++; return 0; }
+    return 1;
+}
+static void cloth_budget_used(void) { g_buildLastQ = t_now() | 1; }
 
 /* ------------------------------------------------------------------------------------------ */
 /* safe memory reads (no SEH / no CRT: check the page first). Small cache of recent queries.  */
@@ -2784,12 +2804,12 @@ static void *sim_core(int kind, void *player, u32 style, void *out, int pfn)
     if (!fromPng)
         return sim_call(kind, player, style, out, pfn);
 
-    EnterCriticalSection(&g_logLock);            /* serialises the (rare) suppressed builds */
+    EnterCriticalSection(&g_clothLock);          /* serialises the (rare) suppressed builds (2.1: own lock, not the data lock) */
     g_suppressTid = GetCurrentThreadId();
     r = sim_call(kind, player, style, out, pfn);
     g_suppressTid = 0;
     st_simBridged++;
-    LeaveCriticalSection(&g_logLock);
+    LeaveCriticalSection(&g_clothLock);
     return r;
 }
 static void *sim_timed(int k, void *p, u32 style, void *out) { u32 t0 = t_now(); void *r = sim_common(k, p, style, out); t_done(T_SIM, t0); return r; }
@@ -3803,7 +3823,7 @@ static DWORD WINAPI perf_thread(LPVOID unused)
     (void)unused;
     for (k = 0; k < T_COUNT; k++) { lastC[k] = g_tCalls[k]; lastU[k] = g_tUs[k]; }
     for (;;) {
-        char line[400], part[80], num[12];
+        char line[700], part[80], num[12];
         u32 tot = 0, calls = 0;
         Sleep(30000);
         line[0] = 0;
@@ -3811,13 +3831,20 @@ static DWORD WINAPI perf_thread(LPVOID unused)
             u32 c = g_tCalls[k] - lastC[k], us = g_tUs[k] - lastU[k];
             lastC[k] = g_tCalls[k]; lastU[k] = g_tUs[k];
             if (!c) continue;
-            calls += c; tot += us;
+            if (k != T_BUILD) { calls += c; tot += us; }   /* 2.1: builds are inside "draw guards" already */
             s_cpy(part, kTimeNames[k], 80); s_cat(part, " ", 80);
             u32_to_dec(c, num); s_cat(part, num, 80); s_cat(part, "x/", 80);
             u32_to_dec(us / 1000, num); s_cat(part, num, 80); s_cat(part, "ms  ", 80);
             s_cat(line, part, sizeof(line));
         }
         if (calls) blog("PERF     last 30 s: all hooks together %u ms (%u calls)  |  %s", tot / 1000, calls, line);
+        {   /* 2.1 */
+            static u32 lw, lr;
+            if (st_buildWaits != lw || st_clothRevived != lr) {
+                blog("PERF     own cloth: %u draw call(s) waited a frame for their build (one build per frame), %u object(s) reused instead of rebuilt (so far)", st_buildWaits, st_clothRevived);
+                lw = st_buildWaits; lr = st_clothRevived;
+            }
+        }
         {
             static u32 lastDrop = 0;
             if (g_logQDropped != lastDrop) { blog("log: %u line(s) dropped so far (queue full)", g_logQDropped); lastDrop = g_logQDropped; }
@@ -3921,6 +3948,7 @@ int mod_start(void)
     int i, cut = 0;
     g_self = g_slamInst;
     InitializeCriticalSection(&g_logLock);
+    InitializeCriticalSection(&g_clothLock);
     crc_init();
     GetModuleFileNameA(NULL, g_dir, MAX_PATH);
     for (i = 0; g_dir[i]; i++) if (g_dir[i] == '\\' || g_dir[i] == '/') cut = i + 1;
