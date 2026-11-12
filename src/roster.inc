@@ -101,22 +101,19 @@ static int es_undo(void)
     }
     return n;
 }
-typedef void *(__fastcall *EsCopy_t)(void *dst, const void *src, u32 n);
-static EsCopy_t g_esCopy = (EsCopy_t)0x00D958B0u;
-/* 0x00501F07: Edit Player "Accept" copies the edited copy back into the roster's player */
-void *__fastcall EsAcceptCopy(void *dst, const void *src, u32 n)
+/* 2.0.1 (user 11-12 20:36): the two Edit Player calls are shared with SigExt / GotoShotExt (edithub.h): whichever mod
+   starts first hooks them, every mod registers what to do on Accept / open. 2.0 hooked them on its own - then the
+   other two could not follow Accept. */
+#include "edithub.h"
+static void __cdecl es_cb_accept(void)     /* Accept copied the player back */
 {
-    void *r = g_esCopy(dst, src, n);
     int k = es_accept();
     if (k) blog("EDIT PLAYER  player accepted: %d Hair Style / Short Length / Wingspan change(s) kept (written when the game saves)", k);
-    return r;
 }
-/* 0x005042A8: Edit Player opens a player (copies him into the edit copy): what the last one did not accept goes */
-void *__fastcall EsOpenCopy(void *dst, const void *src, u32 n)
+static void __cdecl es_cb_open(void)       /* a player is opened: what the last one did not accept goes */
 {
     int k = es_undo();
     if (k) blog("EDIT PLAYER  left without accepting: %d Hair Style / Short Length / Wingspan change(s) undone", k);
-    return g_esCopy(dst, src, n);
 }
 static DWORD WINAPI es_thread(LPVOID unused)    /* Edit Player left (no copy any more) without accepting */
 {
@@ -132,17 +129,15 @@ static DWORD WINAPI es_thread(LPVOID unused)    /* Edit Player left (no copy any
 }
 static void install_editsession(void)
 {
+    const char *how = "";
     if (g_is2k12) return;
-    if (!hair_bytes(0x00501EF6u, "8B 15 18 D5 5D 01 8B 0D 1C D5 5D 01 68 E4 01 00 00 E8") || call_target_of(0x00501F07u) != 0x00D958B0u ||
-        !hair_bytes(0x00504290u, "B9 20 D5 5D 01 68 E4 01 00 00 8B D6") || call_target_of(0x005042A8u) != 0x00D958B0u) {
-        blog("WARNING Edit Player accept / open: game code not as expected - Hair Style / Short Length / Wingspan changes are kept even when a player is not accepted");
+    if (!eh_join("BodyHook", es_cb_accept, es_cb_open, &how)) {
+        blog("WARNING Edit Player Accept not followed (%s) - Hair Style / Short Length / Wingspan changes are kept even when a player is not accepted", how);
         return;
     }
-    if (!patch_call(0x00501F07u, (u32)&EsAcceptCopy)) { blog("WARNING Edit Player accept could not be hooked"); return; }
-    if (!patch_call(0x005042A8u, (u32)&EsOpenCopy)) { patch_call(0x00501F07u, 0x00D958B0u); blog("WARNING Edit Player open could not be hooked"); return; }
     g_esHooks = 1;
     CreateThread(NULL, 0, es_thread, NULL, 0, NULL);
-    blog("EDIT PLAYER  Hair Style / Short Length / Wingspan follow Accept: kept when the player is accepted (00501F07), undone when he is not (005042A8 / leaving)");
+    blog("EDIT PLAYER  Hair Style / Short Length / Wingspan follow Accept: kept when the player is accepted, undone when he is not (shared with SigExt / GotoShotExt: %s)", how);
 }
 
 /* (re)read everything from g_rosterIni */
