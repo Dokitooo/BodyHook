@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2
+
+For weak PCs. Nothing removed, nothing looks different.
+
+- **No more waiting in the draw:** BodyHook checks every player model it draws. Sometimes that check had to wait for another part of BodyHook (a cloth being built, the Short Length watcher), a 3-14 ms freeze each time, several times a second on slow PCs. Now it never waits: it uses the answer from the last frame and checks again next frame.
+- **Short Length** does nothing until someone actually has a length other than 5.
+- **Cheaper memory-safety checks** behind every read (O(1) cache, 256 entries instead of searching 64).
+- **`[Performance] Lite=1`** in `BodyHook.ini`: "potato" mode. The bench keeps the game's own models and its uniforms don't move. Off by default.
+- `BodyHook.log` PERF lines also show memory checks and how often a draw didn't wait.
+- `BodyHook.ini` from 2.1 keeps working (Lite is off when the line is missing).
+
 ## 2.1
 
 Smoother. Nothing removed, nothing looks different.

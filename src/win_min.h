@@ -133,6 +133,7 @@ __declspec(dllimport) void    WINAPI GetLocalTime(SYSTEMTIME*);
 __declspec(dllimport) void    WINAPI InitializeCriticalSection(CRITICAL_SECTION*);
 __declspec(dllimport) void    WINAPI EnterCriticalSection(CRITICAL_SECTION*);
 __declspec(dllimport) void    WINAPI LeaveCriticalSection(CRITICAL_SECTION*);
+__declspec(dllimport) BOOL    WINAPI TryEnterCriticalSection(CRITICAL_SECTION*);   /* 2.2 */
 __declspec(dllimport) BOOL    WINAPI FlushInstructionCache(HANDLE, LPCVOID, SIZE_T);
 __declspec(dllimport) HANDLE  WINAPI GetCurrentProcess(void);
 __declspec(dllimport) DWORD   WINAPI GetCurrentThreadId(void);

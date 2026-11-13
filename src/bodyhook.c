@@ -36,7 +36,7 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
-#define BODYHOOK_VERSION "2.1"
+#define BODYHOOK_VERSION "2.2"
 #include "slam_mod.h"   /* SLAM mod: slam_glue.c has DllMain + SlamModStart, this file starts in mod_start() */
 
 /* ------------------------------------------------------------------------------------------ */
@@ -174,6 +174,7 @@ static int  cfg_legCount = 0;
 #define CLOTH_PER_GROUP 8
 static int  cfg_cloth = 1;
 static int  cfg_stockCloth = 1;   /* [Uniforms] StockClothSize (netcloth.inc) */
+static int  cfg_perfLite = 0;     /* 2.2 [Performance] Lite */
 static int  cfg_matchAnyCloth = 1;
 static int  cfg_clothBridge = 1;
 static int  cfg_cacheNoPng = 1;
@@ -417,12 +418,25 @@ static void cloth_budget_used(void) { g_buildLastQ = t_now() | 1; }
 /* ------------------------------------------------------------------------------------------ */
 /* safe memory reads (no SEH / no CRT: check the page first). Small cache of recent queries.  */
 /* ------------------------------------------------------------------------------------------ */
-#define RQ_CACHE 64     /* 1.11.14 / 1.19.3: 16 thrashed with ~25 player models per frame */
+#define RQ_CACHE 256    /* 2.2: was 64 searched one by one (and round-robin replaced) - now 256 slots, picked by address */
 static u32 g_imgLo = 0, g_imgHi = 0;
 static volatile int g_imgFast = 0;    /* set once the game code is unpacked */
-static struct { u32 lo, hi, tick; } g_rq[RQ_CACHE];
-static volatile u32 g_rqNext = 0, g_rqHit = 0;
+static struct { volatile u32 gen, lo, hi, tick; } g_rq[RQ_CACHE];
+static volatile u32 g_rqHit = 0, g_rqGen = 0;
+static volatile u32 g_rqBusy[RQ_CACHE];
+static volatile u32 st_vq = 0;        /* 2.2: VirtualQuery calls (PERF line) */
+#define RQ_SLOT(a) ((((a) >> 16) ^ ((a) >> 24)) & (RQ_CACHE - 1))   /* the 64 KB block (Windows' allocation unit) */
 
+/* 2.2 (slow PCs): every check is O(1) - the last hit, then the slot of this 64 KB block. A region that is
+ * found stays trusted for 250 ms (as before). A slot is written gen = 0 first and a new, never-0 gen last; a reader
+ * only trusts it when gen was the same before and after reading - never half of one entry and half of another. */
+static int rq_in(u32 i, u32 a, u32 end, u32 now)
+{
+    u32 g = g_rq[i].gen, lo, hi, tk;
+    if (!g) return 0;
+    lo = g_rq[i].lo; hi = g_rq[i].hi; tk = g_rq[i].tick;
+    return g_rq[i].gen == g && now - tk < 250 && a >= lo && end <= hi;
+}
 static int readable(const void *p, u32 n)
 {
     MEMORY_BASIC_INFORMATION mbi;
@@ -431,19 +445,26 @@ static int readable(const void *p, u32 n)
     if (g_imgFast && a >= g_imgLo && end <= g_imgHi) return 1;     /* the exe image is always mapped */
     now = GetTickCount();
     i = g_rqHit;                                                     /* PERF 1.11.30-ML: last hit first */
-    if (i < RQ_CACHE && a >= g_rq[i].lo && end <= g_rq[i].hi && now - g_rq[i].tick < 250) return 1;
-    for (i = 0; i < RQ_CACHE; i++)
-        if (a >= g_rq[i].lo && end <= g_rq[i].hi && now - g_rq[i].tick < 250) { g_rqHit = i; return 1; }
+    if (i < RQ_CACHE && rq_in(i, a, end, now)) return 1;
+    i = RQ_SLOT(a);
+    if (rq_in(i, a, end, now)) { g_rqHit = i; return 1; }
     while (a < end) {
-        u32 lo, hi;
+        u32 lo, hi, k;
+        st_vq++;
         if (!VirtualQuery((const void*)a, &mbi, sizeof(mbi))) return 0;
         if (mbi.State != MEM_COMMIT) return 0;
         if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
         if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
                              PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))) return 0;
         lo = (u32)mbi.BaseAddress; hi = lo + (u32)mbi.RegionSize;
-        i = g_rqNext++ % RQ_CACHE;
-        g_rq[i].lo = lo; g_rq[i].hi = hi; g_rq[i].tick = now;
+        k = RQ_SLOT(a);
+        if (!__sync_val_compare_and_swap(&g_rqBusy[k], 0, 1)) {   /* one writer per slot; busy -> just don't cache */
+            u32 ng = __sync_add_and_fetch(&g_rqGen, 1);
+            if (!ng) ng = __sync_add_and_fetch(&g_rqGen, 1);
+            g_rq[k].gen = 0; g_rq[k].lo = lo; g_rq[k].hi = hi; g_rq[k].tick = now; g_rq[k].gen = ng;
+            g_rqHit = k;
+            __sync_lock_release(&g_rqBusy[k]);
+        }
         a = hi;
     }
     return 1;
@@ -698,6 +719,10 @@ static void load_config(void)
     cfg_benchDiag = ini_int2("Bench", "Diagnostics", 0);
     cfg_benchUniforms = ini_int2("Bench", "BenchUniforms", 1);
     cfg_benchCoaches = ini_int2("Bench", "Coaches", 0);
+    /* 2.2 [Performance] Lite=1: for weak PCs - the bench keeps the game's own models (no high-poly bench, also in
+     * replays) and their uniforms don't move. Players on the floor are not changed. */
+    cfg_perfLite = ini_int2("Performance", "Lite", 0);
+    if (cfg_perfLite) { cfg_benchLive = 0; cfg_benchReplay = 0; cfg_benchUniforms = 0; }
     cfg_poloTex  = ini_fileid("CoachPolo", "Texture", 0xF0752759u);
     cfg_poloNrm  = ini_fileid("CoachPolo", "NormalMap", 0xA5FD6D9Fu);
 
@@ -2576,7 +2601,9 @@ static void *cloth_common_ex(u8 *player, int site, int *fromPng, int quiet)
         if (player_info(player, &pm) && !pm.clothMask) return R;
     }
 
-    EnterCriticalSection(&g_logLock);
+    if (quiet == 2) {                                      /* 2.2: asked from the draw call (garment_static): never wait */
+        if (!TryEnterCriticalSection(&g_logLock)) { *fromPng = -1; return R; }
+    } else EnterCriticalSection(&g_logLock);
     id = cloth_identify((u32)R, &g);
     LeaveCriticalSection(&g_logLock);
 
@@ -3838,6 +3865,14 @@ static DWORD WINAPI perf_thread(LPVOID unused)
             s_cat(line, part, sizeof(line));
         }
         if (calls) blog("PERF     last 30 s: all hooks together %u ms (%u calls)  |  %s", tot / 1000, calls, line);
+        {   /* 2.2: what the draw-call checks cost on this PC */
+            static u32 lvq, lnw, lsb;
+            u32 vq = st_vq, nw = st_drawNoWait, sb = st_slNodeBusy;
+            if (vq != lvq || nw != lnw || sb != lsb)
+                blog("PERF     last 30 s: memory checks (VirtualQuery) %u, draw calls that didn't wait for a busy cloth lock %u, short-length checks put off a frame %u",
+                     vq - lvq, nw - lnw, sb - lsb);
+            lvq = vq; lnw = nw; lsb = sb;
+        }
         {   /* 2.1 */
             static u32 lw, lr;
             if (st_buildWaits != lw || st_clothRevived != lr) {
@@ -3985,6 +4020,7 @@ int mod_start(void)
          cfg_cfidOffset >= 0 ? "fixed offset from ini" : "learned automatically from custom-body pngs",
          g_cfidLegacy ? "  (old ini value PlayerCFIDOffset=0x1C = PortrID, upgraded)" : "");
     blog("FastPngCheck=%d LivePngRefresh=%d PngLoadWaitMs=%u", cfg_fastPath, cfg_liveRefresh, cfg_loadWaitMs);
+    if (cfg_perfLite) blog("PERFORMANCE Lite=1: bench keeps the game's own models (no high-poly bench, also in replays), bench uniforms don't move");
     blog("config: Enabled=%d MatchAnyBodyID=%d StrictGlobalFallback=%d Diagnostics=%d LogEveryLookup=%d ExtraBodyIDs=%d Players=%d",
          cfg_enabled, cfg_matchAnyBody, cfg_strictGlobal, cfg_diagnostics, cfg_logEvery, cfg_extraCount, cfg_overCount);
     for (i = 0; i < cfg_extraCount; i++) blog("   extra body FileID %08X", cfg_extraIds[i]);

@@ -10,6 +10,7 @@ EXPORTS
     DeleteFileA@4
     DisableThreadLibraryCalls@4
     EnterCriticalSection@4
+    TryEnterCriticalSection@4
     FindClose@4
     FindFirstFileA@8
     FindNextFileA@8

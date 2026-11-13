@@ -1,7 +1,23 @@
 ===============================================================================
-  BodyHook 2.1  -  Per-player bodies, tattoos, uniforms and accessories
+  BodyHook 2.2  -  Per-player bodies, tattoos, uniforms and accessories
                    for NBA 2K14 PC
 ===============================================================================
+
+NEW IN 2.2  (for weak PCs - nothing removed, nothing looks different)
+----------
+  * NO MORE WAITING IN THE DRAW: BodyHook checks every player model it draws.
+    Sometimes such a check had to wait for another part of BodyHook (a cloth
+    being built, the Short Length watcher) - a 3-14 ms freeze each time, on
+    slow PCs several times a second. Now it never waits: it uses the answer
+    from the last frame and checks again next frame.
+  * Short Length does nothing until someone actually has a length other than 5.
+  * The memory-safety checks behind every read are much cheaper (O(1) cache,
+    256 entries instead of searching 64).
+  * [Performance] Lite=1 in BodyHook.ini: "potato" mode - bench keeps the
+    game's own models and its uniforms don't move. Off by default.
+  * BodyHook.log PERF lines also show memory checks and how often a draw
+    didn't wait.
+  BodyHook.ini from 2.1 keeps working (Lite is off when the line is missing).
 
 NEW IN 2.1  (smoother - nothing removed, nothing looks different)
 ----------

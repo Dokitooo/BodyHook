@@ -365,12 +365,14 @@ static DWORD WINAPI sl_watch_thread(LPVOID unused)
  * here every node gets its player's length right before the game uses it. Fast path: a small cache
  * (instance -> player, CFID, rest pointer) so an unchanged node costs a few reads. */
 static struct { u32 inst, player, cfid, rest, gen; } g_slNode[64];
-static volatile u32 st_slNode = 0;
+static volatile u32 st_slNode = 0, st_slNodeBusy = 0;
 static void sl_node(u32 d)
 {
     u32 obj = 0, inst = 0, player = 0, cfid, mesh = 0, h, rest;
     int len, r;
     if (!g_slReady || !d) return;
+    /* 2.2: nobody has a length other than 5 and no copy was ever made -> every instance already uses its own data */
+    if (!g_slSelCount && !g_slVarCount) return;
     if (!read32(d + 0x30, &obj) || !obj || !read32(obj, &inst) || !inst || !read32(d + 0x08, &player) || !player) return;
     if (!read32(inst + 0x78, &rest)) return;
     h = (inst >> 4) & 63;
@@ -378,7 +380,8 @@ static void sl_node(u32 d)
     if (g_slNode[h].inst == inst && g_slNode[h].player == player && g_slNode[h].cfid == cfid && g_slNode[h].rest == rest &&
         g_slNode[h].gen == g_slGen) return;
     if (!read32(inst + 0xA8, &mesh) || !mesh) return;
-    EnterCriticalSection(&g_slLock);
+    /* 2.2: the draw call never waits - the watcher thread (every 200 ms) or a builder holds the lock; next frame then */
+    if (!TryEnterCriticalSection(&g_slLock)) { st_slNodeBusy++; return; }
     len = cfid ? sl_get(cfid) : 5;
     r = sl_apply(inst, mesh, len);
     if (r) {

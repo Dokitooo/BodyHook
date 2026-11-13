@@ -234,6 +234,29 @@ static volatile u32 st_clothDeferred = 0;
 
 #define BENCH_REPLACE_GAP_MS 250
 #define BENCH_PLACE_MS        60
+/* 2.2 (stutter on slow PCs): the draw call never waits for the cloth lock. It is held while a cloth object is built
+ * (10-25 ms, also on the game's loading thread). Busy -> the objects this player got last time (kept at least the
+ * 3 s grace before any slot is reused), or - never seen - the game's own cloth for this one frame. */
+typedef struct { volatile u32 player, j, s, tick; } ClothLast;
+static ClothLast g_lastBench[64], g_lastStat[64], g_lastOwn[64];
+static volatile u32 st_drawNoWait = 0;
+static void cl_put(ClothLast *t, u32 player, u32 j, u32 s)
+{
+    ClothLast *e = &t[(player >> 4) & 63];
+    e->player = 0; e->j = j; e->s = s; e->tick = GetTickCount(); e->player = player;   /* player last: all or nothing */
+}
+/* only an answer from the last second: a slot is reused only after CLOTH_GRACE_MS (3 s) unused or retired, so these
+ * objects can't be in the middle of a rebuild for someone else */
+static int cl_get(ClothLast *t, u32 player, u32 *outJ, u32 *outS)
+{
+    ClothLast *e = &t[(player >> 4) & 63]; u32 j, s, tk;
+    st_drawNoWait++;
+    if (e->player != player) return 0;
+    j = e->j; s = e->s; tk = e->tick;
+    if (e->player != player || !j || !s || GetTickCount() - tk > 1000) return 0;
+    *outJ = j; *outS = s;
+    return 1;
+}
 static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
 {
     u32 uni = 0, sj = 1, ss = 0, v, mode = (u32)cfg_benchUniforms, sig, now = GetTickCount(), bodyw = 0, tb;
@@ -253,7 +276,7 @@ static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
     /* who is in this record: png CFID + body word (bodytype) - records are reused for other people */
     read32(player + P_offBodyWord, &bodyw);
     sig = player_cfid((u8*)player) ^ (bodyw << 16) ^ (bodyw >> 16) ^ (mode == 1 ? cloth_src_key(player, sj, ss) : 0);
-    EnterCriticalSection(&g_clothLock);
+    if (!TryEnterCriticalSection(&g_clothLock)) { *fresh = 0; return cl_get(g_lastBench, player, outJ, outS); }   /* 2.2 */
     for (i = 0; i < g_benchObjN; i++)
         if (!g_benchObj[i].retired && g_benchObj[i].used && g_benchObj[i].player == player && g_benchObj[i].mode == mode) break;
     if (i < g_benchObjN && (g_benchObj[i].styleJ != sj || g_benchObj[i].styleS != ss || g_benchObj[i].sig != sig))
@@ -310,6 +333,7 @@ static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
     *fresh = (int)(now - g_benchObj[i].placeUntil) > 0 ? 0 : 1;   /* every call until placeUntil */
     g_benchObj[i].fresh = 0;
     v = g_benchObj[i].ok;
+    if (v) cl_put(g_lastBench, player, *outJ, *outS); else g_lastBench[(player >> 4) & 63].player = 0;
     LeaveCriticalSection(&g_clothLock);
     return (int)v;
 }
@@ -358,6 +382,7 @@ static int garment_static(u32 player, int kind)
 {
     u32 now = GetTickCount(), cf, i, slot = (player >> 4) & 63;
     int k, f;
+    u8 st[2];
     if (g_garmCache[slot].player == player && now - g_garmCache[slot].tick < 1000) return g_garmCache[slot].st[kind];
     for (k = 0; k < 2; k++) {
         int site = k ? 2 : 0;
@@ -365,11 +390,14 @@ static int garment_static(u32 player, int kind)
         if (g_clothGetter[site] && png_ready((u8*)player, &cf)) {
             PngMasks pm;
             if (!cfg_fastPath || !g_scanDone || !player_info((u8*)player, &pm) || pm.clothMask)
-                cloth_common_ex((u8*)player, site, &f, 1);
+                cloth_common_ex((u8*)player, site, &f, 2);   /* 2.2: 2 = from the draw call, never waits */
         }
-        g_garmCache[slot].st[k] = (u8)(f != 0);
+        if (f < 0)   /* 2.2: the data lock was busy - answer from the last check (or "no") and ask again next frame */
+            return g_garmCache[slot].player == player ? g_garmCache[slot].st[kind] : 0;
+        st[k] = (u8)(f != 0);
     }
     (void)i;
+    g_garmCache[slot].st[0] = st[0]; g_garmCache[slot].st[1] = st[1];
     g_garmCache[slot].player = player; g_garmCache[slot].tick = now;
     return g_garmCache[slot].st[kind];
 }
@@ -385,7 +413,7 @@ static int static_objects(u32 player, u32 *outJ, u32 *outS)
     if (uni && read32(uni + 0x34, &v)) ss = v >> 30;
     read32(player + P_offBodyWord, &bodyw);
     sig = player_cfid((u8*)player) ^ (bodyw << 16) ^ (bodyw >> 16);
-    EnterCriticalSection(&g_clothLock);
+    if (!TryEnterCriticalSection(&g_clothLock)) return cl_get(g_lastStat, player, outJ, outS);   /* 2.2 */
     for (i = 0; i < g_statObjN; i++) if (!g_statObj[i].retired && g_statObj[i].used && g_statObj[i].player == player) break;
     if (i < g_statObjN && (g_statObj[i].sig != sig || g_statObj[i].styleJ != sj || g_statObj[i].styleS != ss)) rebuild = 1;
     if (rebuild && now - g_statObj[i].builtTick < CLOTH_REBUILD_MS) rebuild = 0;
@@ -424,6 +452,7 @@ static int static_objects(u32 player, u32 *outJ, u32 *outS)
     g_statObj[i].lastTick = now;
     *outJ = (u32)g_statObj[i].objJ; *outS = (u32)g_statObj[i].objS;
     v = g_statObj[i].ok;
+    if (v) cl_put(g_lastStat, player, *outJ, *outS); else g_lastStat[(player >> 4) & 63].player = 0;
     LeaveCriticalSection(&g_clothLock);
     return (int)v;
 }
@@ -504,7 +533,7 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
     int i, n, rebuild = 0, revived = 0;
     read32(player + P_offBodyWord, &bodyw);
     sig = player_cfid((u8*)player) ^ (bodyw << 16) ^ (bodyw >> 16) ^ cloth_src_key(player, sj, ss);
-    EnterCriticalSection(&g_clothLock);
+    if (!TryEnterCriticalSection(&g_clothLock)) { *fresh = 0; return cl_get(g_lastOwn, player, outJ, outS); }   /* 2.2 */
     for (i = 0; i < g_ownObjN; i++) if (!g_ownObj[i].retired && g_ownObj[i].used && g_ownObj[i].player == player) break;
     *fresh = 0;
     if (i < g_ownObjN && (g_ownObj[i].sig != sig || g_ownObj[i].styleJ != sj || g_ownObj[i].styleS != ss)) rebuild = 1;
@@ -546,6 +575,7 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
     g_ownObj[i].lastTick = now;
     *outJ = (u32)g_ownObj[i].objJ; *outS = (u32)g_ownObj[i].objS;
     v = g_ownObj[i].ok;
+    if (v) cl_put(g_lastOwn, player, *outJ, *outS); else g_lastOwn[(player >> 4) & 63].player = 0;
     LeaveCriticalSection(&g_clothLock);
     return (int)v;
 }
@@ -557,7 +587,7 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
  * with the same object within 300 ms gets his own cloth objects. */
 static struct { u32 obj, player, tick; } g_clothShare[16];
 static void own_retire_all(void)   /* 1.11.29-ML: the game rebuilt its players (pause / restart): drop our own cloth objects */
-{ int i; u32 now = GetTickCount(); EnterCriticalSection(&g_clothLock); for (i = 0; i < g_ownObjN; i++) if (g_ownObj[i].used && !g_ownObj[i].retired) { g_ownObj[i].retired = 1; g_ownObj[i].retireTick = now; } LeaveCriticalSection(&g_clothLock); }   /* 1.11.29-ML: practice passer on the floor -> every player gets his own cloth */
+{ int i; u32 now = GetTickCount(); EnterCriticalSection(&g_clothLock); for (i = 0; i < g_ownObjN; i++) if (g_ownObj[i].used && !g_ownObj[i].retired) { g_ownObj[i].retired = 1; g_ownObj[i].retireTick = now; } for (i = 0; i < 64; i++) g_lastOwn[i].player = 0; LeaveCriticalSection(&g_clothLock); }   /* 1.11.29-ML: practice passer on the floor -> every player gets his own cloth */
 static int cloth_shared(u32 obj, u32 player, u32 now)
 {
     int i, free_ = -1;
