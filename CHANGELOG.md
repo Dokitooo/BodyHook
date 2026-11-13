@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.1
+
+Two crash fixes. Nothing removed, nothing looks different.
+
+- **Crash late in a game** (cloth, `nba2k14.exe+5AC55`, often in the 3rd or 4th quarter, a moment after a transition screen): the game replaces its jersey and shorts cloth data during a game, and BodyHook's own cloth objects (high-poly bench uniforms, own cloth) could be used for a moment after their data was gone. Now every one is checked before the game gets it; one whose data is gone is never used again and is rebuilt right away from the cloth the game has now. Costs a few millionths of a second per frame.
+- **Crash 1 second after starting the game** (`BodyHook.asi+15157`): the start-up search could read memory outside `nba2k14.exe` that had just been freed. It now only looks inside the game's own code.
+- **More room for cloth objects** (bench 64, own 32), so a whole bench can be rebuilt at once.
+- `BodyHook.log`: a "PERF cloth safety" line says how often cloth data was replaced.
+- `BodyHook.ini` from 2.2 keeps working unchanged.
+
 ## 2.2
 
 For weak PCs. Nothing removed, nothing looks different.

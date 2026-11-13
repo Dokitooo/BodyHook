@@ -115,9 +115,185 @@ __declspec(naked) void BenchStore(void)
 typedef u32 (__fastcall *ModelFn_t)(void *model, void *desc);
 typedef u32 (__cdecl *SizeFn_t)(void);
 #define BENCH_OBJ 0x8000                /* object + its own simulation memory */
-#define BENCH_PLAYERS 40
+#define BENCH_PLAYERS 64                /* 2.2.1: was 40 - a whole bench rebuilt at once needs old + new slots */
+/* ---- 2.2.1: a cloth object is only handed to the game while its cloth data is still there ----------------------
+ * Crash reports (2.1 and 2.2, 25-60 minutes into a game, a second after a transition screen loaded): the game's cloth
+ * solver (0x0045AA40, movdqa at 0x0045AC55) ran on one of BodyHook's BENCH cloth objects whose ClothMesh memory had
+ * been given to another file meanwhile - its constraint list (instance +84) held other data. A moving cloth object
+ * is a copy of the ClothMesh header plus its own particles; rest shape, constraint groups and index data stay in the
+ * cloth file's memory. The game replaces that data at transitions (the logs show every bench object rebuilt then),
+ * and BodyHook kept handing out the old object until its rebuild came up: at most once per 1.5 s, one build per
+ * frame (2.1), "no free slot: keep the old one", or the last answer while the cloth lock was busy (2.2).
+ * Now every hand-out is checked (once per object and ~frame, a few dozen reads):
+ *   1 the ClothMesh is still readable and a ClothMesh           2 the game still has it loaded (its ClothMesh array)
+ *   3 its header (counts, data pointers) is what the object was built from
+ *   4 / 5 (NBA 2K14) the solver's group list is the one it was built with, and every group still gives the solver the
+ *     16-byte aligned index address it needs (what the crash was)
+ * An object that fails is not used again; the bench player is rebuilt right away from the cloth the game has now.
+ * A check that fails on freshly built objects (other cloth data layout than expected) switches itself off, and so do
+ * the content checks (3, 4) if they keep failing on new objects - then BodyHook works as 2.2 did. */
+typedef struct { u32 mesh, hdr, topo, mask; volatile u32 tick, ok; u32 why, run; } ClothSnap;   /* tick: the last check (ok: passed, why: failed) */
+#define GATE_GONE 1
+#define GATE_UNLOADED 2
+#define GATE_HDR 3
+#define GATE_TOPO 4
+#define GATE_ALIGN 5
+static volatile u32 g_gateSkip = 0, st_gateStale = 0;
+static u32 g_gateWhy[8], g_gateFresh[8];
+/* What the checks read lies in the cloth file's memory - the very memory that may be gone. It is read with
+ * ReadProcessMemory (never faults; readable() can be up to 250 ms behind), once per ClothMesh and ~frame for all the
+ * objects made from it. */
+#define CS_MEMO_MS 8
+typedef struct { volatile u32 busy; u32 mesh, list, n, b88, b94, tick, valid, listOk, hdr, topo, mask; } MeshPeek;
+static MeshPeek g_peek[32];
+static volatile u32 st_peeks = 0;
+static int cs_rpm(u32 a, void *buf, u32 n)
+{
+    SIZE_T got = 0;
+    return a >= 0x10000 && a + n > a && ReadProcessMemory(GetCurrentProcess(), (LPCVOID)a, buf, n, &got) && got == n;
+}
+/* the solver's constraint groups: 16 bytes each at instance +84 (+8 count (16 bits), +A index offset); the index data
+ * is at +88 or +94, read with movdqa from base + offset*4 */
+static void peek_read(MeshPeek *o, u32 mesh, u32 list, u32 n, u32 b88, u32 b94)
+{
+    /* counts + what the solver reads through the object. Not +78 / +8C / +90 (rest shape, constraints: other lengths
+     * and practice mode swap them - "fp flips each draw") and not +7C (the game moves it, 1.11.24) */
+    static const u8 f[6] = { 0xB8, 0xBC, 0xC0, 0x84, 0x88, 0x94 };
+    u32 hd[0xD0 / 4], rec[31 * 4], c = 0x811C9DC5u, m = 3, i;
+    o->mesh = mesh; o->list = list; o->n = n; o->b88 = b88; o->b94 = b94;
+    o->valid = 0; o->listOk = 0; o->hdr = 0; o->topo = 0; o->mask = 0;
+    st_peeks++;
+    if (!mesh || !cs_rpm(mesh, hd, 0xD0) || hd[0xA4 / 4] != CLOTH_MAGIC) return;
+    for (i = 0; i < 6; i++) c = (c ^ hd[f[i] / 4]) * 0x01000193u;
+    o->hdr = c ? c : 1; o->valid = 1;
+    if (g_is2k12 || n > 31) return;
+    if (n && !cs_rpm(list, rec, n * 16)) return;
+    c = 0x811C9DC5u;
+    for (i = 0; i < n; i++) {
+        u32 w = rec[i * 4 + 2];
+        c = (c ^ w) * 0x01000193u;
+        if (w & 0xFFFF) { if ((b88 + (w >> 16) * 4) & 15) m &= ~1u; if ((b94 + (w >> 16) * 4) & 15) m &= ~2u; }
+    }
+    o->topo = c; o->mask = m; o->listOk = 1;
+}
+static void mesh_peek(MeshPeek *out, u32 inst, u32 now)
+{
+    u32 mesh = *(const u32*)(inst + 0xA8), list = *(const u32*)(inst + 0x84), n = (*(const u32*)(inst + 0xB8) >> 26) & 31;
+    u32 b88 = *(const u32*)(inst + 0x88), b94 = *(const u32*)(inst + 0x94);
+    MeshPeek *e = &g_peek[((mesh >> 6) ^ (mesh >> 12) ^ (list >> 6)) & 31];
+    if (__sync_val_compare_and_swap(&e->busy, 0, 1) == 0) {
+        if (!(e->tick && now - e->tick < CS_MEMO_MS && e->mesh == mesh && e->list == list && e->n == n && e->b88 == b88 && e->b94 == b94)) {
+            peek_read(e, mesh, list, n, b88, b94);
+            e->tick = now ? now : 1;
+        }
+        out->valid = e->valid; out->listOk = e->listOk; out->hdr = e->hdr; out->topo = e->topo; out->mask = e->mask;
+        __sync_lock_release(&e->busy);
+    } else peek_read(out, mesh, list, n, b88, b94);             /* another thread is at this entry: read it ourselves */
+}
+/* 0 = fine to simulate, else the GATE_ reason */
+static int cs_check(const ClothSnap *s, u32 obj, int kind, u32 now)
+{
+    u32 inst = *(const u32*)obj, mesh, skip = g_gateSkip, i, n, v;
+    MeshPeek p;
+    if (!inst) return 0;                                             /* static object: nothing is simulated */
+    if (inst < obj || inst + 0xD0 > obj + BENCH_OBJ) return 0;       /* not laid out as expected: as before */
+    mesh = *(const u32*)(inst + 0xA8);
+    mesh_peek(&p, inst, now);
+    if (!p.valid) return (skip & (1u << GATE_GONE)) ? 0 : GATE_GONE;
+    if (!(skip & (1u << GATE_UNLOADED)) && g_simArr[kind]) {
+        n = kind ? P_clothCountS : P_clothCountJ;
+        for (i = 0; i < n; i++) if (read32(g_simArr[kind] + i * 4, &v) && v == mesh) break;
+        if (i == n) return GATE_UNLOADED;
+    }
+    if (!(skip & (1u << GATE_HDR)) && (mesh != s->mesh || p.hdr != s->hdr)) return GATE_HDR;
+    if (!g_is2k12 && (skip & ((1u << GATE_TOPO) | (1u << GATE_ALIGN))) != ((1u << GATE_TOPO) | (1u << GATE_ALIGN))) {
+        if (!p.listOk) return (skip & (1u << GATE_TOPO)) ? GATE_ALIGN : GATE_TOPO;
+        if (!(skip & (1u << GATE_TOPO)) && p.topo != s->topo) return GATE_TOPO;
+        if (!(skip & (1u << GATE_ALIGN)) && (p.mask & s->mask) != s->mask) return GATE_ALIGN;
+    }
+    return 0;
+}
+static void cs_off(u32 bits, const char *why)
+{
+    if ((g_gateSkip & bits) == bits) return;
+    g_gateSkip |= bits;
+    blog("CLOTH    safety check(s) %X switched off: %s", bits, why);
+}
+/* right after a build (cloth lock held): what the object was built from. 1 = it passes its own checks */
+static int cs_take(ClothSnap *s, u32 obj, int kind, u32 now)
+{
+    u32 inst = *(const u32*)obj;
+    MeshPeek p;
+    int why, tries;
+    memset(s, 0, sizeof(*s));
+    if (!inst || inst < obj || inst + 0xD0 > obj + BENCH_OBJ) return 1;
+    mesh_peek(&p, inst, now);
+    s->mesh = *(const u32*)(inst + 0xA8); s->hdr = p.hdr; s->topo = p.topo; s->mask = p.listOk ? p.mask : 0;
+    for (tries = 0; tries < 6; tries++) {
+        why = cs_check(s, obj, kind, now);
+        if (!why) { s->ok = 1; s->tick = now; return 1; }
+        /* a NEW object that fails: this game's cloth data is not laid out as expected (or the game replaced the data
+         * during the build - then it stays unused). The third time, that check is off for good. */
+        if (++g_gateFresh[why] < 3) return 0;
+        cs_off(1u << why, "it fails on newly built cloth objects (other cloth data layout)");
+    }
+    return 0;
+}
+static int cs_safe(ClothSnap *s, u32 obj, int kind, u32 now)
+{
+    int why;
+    if (now - s->tick < CS_MEMO_MS && (s->ok || s->why)) return (int)s->ok;   /* checked a moment ago (this frame) */
+    why = cs_check(s, obj, kind, now);
+    if (why) {
+        if (s->ok) { st_gateStale++; g_gateWhy[why & 7]++; }          /* counted once per object */
+        s->ok = 0; s->why = (u32)why; s->tick = now;
+        return 0;
+    }
+    s->ok = 1; s->tick = now;
+    return 1;
+}
+/* The content checks (3, 4) are right when a cloth file was replaced - then the rebuilt object is fine. A player whose
+ * NEW object fails them again within 3 s, three times in a row, has cloth data the game itself keeps changing while
+ * it is loaded: those two checks go off (1, 2 and 5 stay). old = the failed object's checks, built = when it was built;
+ * returns the run length for the object built in its place (cloth lock held). */
+static u32 cs_run(const ClothSnap *old, u32 built)
+{
+    const ClothSnap *f = !old[0].ok && old[0].why ? &old[0] : &old[1];
+    u32 run = old[0].run;
+    if (f->ok || (f->why != GATE_HDR && f->why != GATE_TOPO) || f->tick - built > 3000) return 0;
+    if (++run >= 3) cs_off((1u << GATE_HDR) | (1u << GATE_TOPO), "the game changes this data while the cloth file stays loaded");
+    return run;
+}
+/* builds that cannot wait for the one-build-per-frame budget (the player has no usable object): at most
+ * CLOTH_BURST per 14 ms, the others a frame later */
+#define CLOTH_BURST 8
+static int cloth_burst_ok(void)
+{
+    static u32 q0, n;
+    u32 q = t_now();
+    if (!g_qpcPerUs) return 1;
+    if (!q0 || (q - q0) / g_qpcPerUs >= CLOTH_BUILD_GAP_US) { q0 = q ? q : 1; n = 0; }
+    if (n >= CLOTH_BURST) return 0;
+    n++;
+    return 1;
+}
+#define CLOTH_UNSAFE_MS 250             /* an unusable object is rebuilt at most this often per player */
+#define CLOTH_STALE_GRACE_MS 500        /* an unusable object's slot: the cloth worker is done with it within a frame or two */
+/* the ClothMesh slot the builder will read for this player holds a ClothMesh (or nothing = static) right now */
+static int bench_src_live(u32 player, int kind, u32 style)
+{
+    u32 bodyw = 0, mesh = 0, hd[0xA8 / 4];
+    int bt;
+    if (!g_simArr[kind] || !read32(player + P_offBodyWord, &bodyw)) return 1;      /* unknown: as before */
+    bt = ((int)(bodyw << P_btShl)) >> 29;
+    if (bt < 0 || bt > 3 || style > 15) return 1;
+    if (!read32(g_simArr[kind] + (u32)(bt + (int)style * 4) * 4, &mesh) || !mesh) return 1;
+    return cs_rpm(mesh, hd, 0xA8) && hd[0xA4 / 4] == CLOTH_MAGIC;
+}
+
 /* objects must be 16-byte aligned (0x00BE0580 uses movaps on obj+10); 128 for the sim memory after it */
-__declspec(align(128)) static struct { u8 objJ[BENCH_OBJ], objS[BENCH_OBJ]; u32 player, styleJ, styleS, ok, fresh, mode, sig, lastTick, lastDesc, placeUntil, lastSimQ, used, retired, retireTick, builtTick; u8 pad[0x44]; } g_benchObj[BENCH_PLAYERS];
+__declspec(align(128)) static struct { u8 objJ[BENCH_OBJ], objS[BENCH_OBJ]; u32 player, styleJ, styleS, ok, fresh, mode, sig, lastTick, lastDesc, placeUntil, lastSimQ, used, retired, retireTick, builtTick; ClothSnap snap[2]; u8 pad[0x04]; } g_benchObj[BENCH_PLAYERS];
+typedef char bench_obj_size_check[(sizeof(g_benchObj[0]) == 2 * BENCH_OBJ + 0x80) ? 1 : -1];
 static int g_benchObjN = 0;
 static u32 g_benchNeedJ = 0, g_benchNeedS = 0, g_benchNeedTick = 0;
 /* PERF 1.11.14 / 1.19.3: the cloth update (0x00BF1E70 -> simulation 0x00BE0580) runs from TWO model
@@ -177,9 +353,9 @@ static u32 bench_need(u32 builder)
 {
     const u8 *f = (const u8*)(builder - 0x60);
     u32 al, sz, alignFn;
-    if (!builder || !readable(f, 8) || !(f[0] == 0x53 && f[1] == 0x55 && f[2] == 0x56 && f[3] == 0x57 && f[4] == 0xE8)) return 0;
+    if (!builder || !in_image((u32)f, 0x70) || !readable(f, 8) || !(f[0] == 0x53 && f[1] == 0x55 && f[2] == 0x56 && f[3] == 0x57 && f[4] == 0xE8)) return 0;
     alignFn = call_target_of(builder + (g_is2k12 ? 8 : 0x3F));         /* 2K12: called right after the prologue */
-    if (call_target_of((u32)f + 4) != alignFn) return 0;
+    if (call_target_of((u32)f + 4) != alignFn || !in_image(alignFn, 16)) return 0;   /* 2.2.1: it is called below */
     sz = ((SizeFn_t)(u32)f)();
     al = ((SizeFn_t)alignFn)();
     if (!sz || sz > 0x100000 || al > 0x1000) return 0;
@@ -260,7 +436,7 @@ static int cl_get(ClothLast *t, u32 player, u32 *outJ, u32 *outS)
 static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
 {
     u32 uni = 0, sj = 1, ss = 0, v, mode = (u32)cfg_benchUniforms, sig, now = GetTickCount(), bodyw = 0, tb;
-    int i, n, rebuild = 0, revived = 0;
+    int i, n, rebuild = 0, revived = 0, unsafe = 0;
     if (!g_simFn[0] || !g_simFn[1] || !g_simFetch[0] || !g_simFetch[1]) return 0;   /* need the fetch stubs */
     if (!readable((void*)player, P_offUniform + 8) || !read32(player + P_offUniform, &uni)) return 0;
     if (uni && !readable((void*)uni, 0x38)) return 0;                                /* not a usable record */
@@ -276,21 +452,35 @@ static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
     /* who is in this record: png CFID + body word (bodytype) - records are reused for other people */
     read32(player + P_offBodyWord, &bodyw);
     sig = player_cfid((u8*)player) ^ (bodyw << 16) ^ (bodyw >> 16) ^ (mode == 1 ? cloth_src_key(player, sj, ss) : 0);
-    if (!TryEnterCriticalSection(&g_clothLock)) { *fresh = 0; return cl_get(g_lastBench, player, outJ, outS); }   /* 2.2 */
+    if (!TryEnterCriticalSection(&g_clothLock)) {                                                                 /* 2.2 */
+        *fresh = 0;
+        if (!cl_get(g_lastBench, player, outJ, outS)) return 0;
+        /* 2.2.1: the remembered objects too are only used while their cloth data is there */
+        i = (int)((*outJ - (u32)&g_benchObj[0]) / (u32)sizeof(g_benchObj[0]));
+        if (i < 0 || i >= BENCH_PLAYERS || *outJ != (u32)g_benchObj[i].objJ || *outS != (u32)g_benchObj[i].objS) return 0;
+        return cs_safe(&g_benchObj[i].snap[0], *outJ, 0, now) && cs_safe(&g_benchObj[i].snap[1], *outS, 1, now);
+    }
     for (i = 0; i < g_benchObjN; i++)
         if (!g_benchObj[i].retired && g_benchObj[i].used && g_benchObj[i].player == player && g_benchObj[i].mode == mode) break;
     if (i < g_benchObjN && (g_benchObj[i].styleJ != sj || g_benchObj[i].styleS != ss || g_benchObj[i].sig != sig))
         rebuild = 1;                                       /* same record, different player / uniform */
-    if (rebuild && now - g_benchObj[i].builtTick < CLOTH_REBUILD_MS) rebuild = 0;   /* not again so soon */
+    /* 2.2.1: its cloth data is gone / replaced -> it must not be used again, not even while its rebuild waits */
+    if (i < g_benchObjN && g_benchObj[i].ok &&
+        !(cs_safe(&g_benchObj[i].snap[0], (u32)g_benchObj[i].objJ, 0, now) && cs_safe(&g_benchObj[i].snap[1], (u32)g_benchObj[i].objS, 1, now))) {
+        unsafe = 1; rebuild = 1;
+    }
+    if (rebuild && now - g_benchObj[i].builtTick < (unsafe ? CLOTH_UNSAFE_MS : CLOTH_REBUILD_MS)) rebuild = 0;   /* not again so soon */
     if (i == g_benchObjN || rebuild) {   /* 2.1: built before for this player + uniform and only retired: use it again (no build) */
         int k;
         for (k = 0; k < g_benchObjN; k++)
             if (g_benchObj[k].retired && g_benchObj[k].used && g_benchObj[k].ok && g_benchObj[k].player == player && g_benchObj[k].sig == sig &&
-                g_benchObj[k].styleJ == sj && g_benchObj[k].styleS == ss && g_benchObj[k].mode == mode) break;
+                g_benchObj[k].styleJ == sj && g_benchObj[k].styleS == ss && g_benchObj[k].mode == mode &&
+                cs_safe(&g_benchObj[k].snap[0], (u32)g_benchObj[k].objJ, 0, now) && cs_safe(&g_benchObj[k].snap[1], (u32)g_benchObj[k].objS, 1, now)) break;   /* 2.2.1 */
         if (k < g_benchObjN) {
             if (rebuild) { g_benchObj[i].retired = 1; g_benchObj[i].retireTick = now; }
-            i = k; g_benchObj[i].retired = 0; g_benchObj[i].lastTick = 0; revived = 1; rebuild = 0; st_clothRevived++;
-        } else if (rebuild && !cloth_budget_ok()) rebuild = 0;          /* 2.1: rebuilt a frame later, the old one meanwhile */
+            i = k; g_benchObj[i].retired = 0; g_benchObj[i].lastTick = 0; revived = 1; rebuild = 0; unsafe = 0; st_clothRevived++;
+        } else if (rebuild && !unsafe && !cloth_budget_ok()) rebuild = 0;   /* 2.1: rebuilt a frame later, the old one meanwhile */
+        else if (rebuild && unsafe && !cloth_burst_ok()) rebuild = 0;       /* 2.2.1: no usable object - a few per frame, never the old one */
     }
     if (!revived && (i == g_benchObjN || rebuild)) {
         CLOTH_PICK(g_benchObj, g_benchObjN, BENCH_PLAYERS, now, rebuild ? i : -1, n);
@@ -298,7 +488,19 @@ static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
             st_clothDeferred++;
             if (!rebuild) { LeaveCriticalSection(&g_clothLock); return 0; }
         } else {
+            u32 run = 0;
+            /* 2.2.1: never build from a ClothMesh slot that does not hold a ClothMesh right now (file being replaced) */
+            if (mode == 1 && !(bench_src_live(player, 0, sj) && bench_src_live(player, 1, ss))) {
+                st_clothDeferred++;
+                LeaveCriticalSection(&g_clothLock);
+                g_lastBench[(player >> 4) & 63].player = 0;
+                return 0;
+            }
             if (rebuild) { g_benchObj[i].retired = 1; g_benchObj[i].retireTick = now; }   /* the worker may still use it */
+            if (unsafe) {                                                                   /* 2.2.1 */
+                run = cs_run(g_benchObj[i].snap, g_benchObj[i].builtTick);
+                g_benchObj[i].retireTick = now - (CLOTH_GRACE_MS - CLOTH_STALE_GRACE_MS);   /* never handed out again: free sooner */
+            }
             i = n;
             memset(&g_benchObj[i], 0, sizeof(g_benchObj[i]));
             g_benchObj[i].sig = sig; g_benchObj[i].used = 1; g_benchObj[i].builtTick = now;
@@ -317,6 +519,9 @@ static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
                 g_benchObj[i].ok = *(u32*)g_benchObj[i].objJ == 0 && *(u32*)g_benchObj[i].objS == 0;
             }
             t_done(T_BUILD, tb); cloth_budget_used();
+            cs_take(&g_benchObj[i].snap[0], (u32)g_benchObj[i].objJ, 0, now);   /* 2.2.1: what it was built from */
+            cs_take(&g_benchObj[i].snap[1], (u32)g_benchObj[i].objS, 1, now);
+            g_benchObj[i].snap[0].run = run;
             g_benchObj[i].fresh = 1;
             blog("BENCH    %s uniform for player %08X%s (memory %X/%X) (jersey style %u%s, shorts style %u%s)%s",
                  mode == 1 ? "moving-cloth" : "static", player, rebuild ? " (rebuilt in a new slot)" : "", g_benchNeedJ, g_benchNeedS,
@@ -333,6 +538,8 @@ static int bench_objects(u32 player, u32 desc, u32 *outJ, u32 *outS, int *fresh)
     *fresh = (int)(now - g_benchObj[i].placeUntil) > 0 ? 0 : 1;   /* every call until placeUntil */
     g_benchObj[i].fresh = 0;
     v = g_benchObj[i].ok;
+    /* 2.2.1: the last word - whatever happened above, an object without its cloth data never leaves here */
+    if (v && !(cs_safe(&g_benchObj[i].snap[0], *outJ, 0, now) && cs_safe(&g_benchObj[i].snap[1], *outS, 1, now))) v = 0;
     if (v) cl_put(g_lastBench, player, *outJ, *outS); else g_lastBench[(player >> 4) & 63].player = 0;
     LeaveCriticalSection(&g_clothLock);
     return (int)v;
@@ -499,8 +706,9 @@ static void static_restore(u32 d, int r, u32 saveJ, u32 saveS)
  * player's own body size + uniform style uses (the game's arrays, [size + style*4]) gets this
  * player's own cloth objects for the call - built like the game builds his (cloth bridge, so a png
  * static garment stays static), simulated with the node's time step. Short Length then applies.  */
-#define OWN_PLAYERS 24
-__declspec(align(128)) static struct { u8 objJ[BENCH_OBJ], objS[BENCH_OBJ]; u32 player, sig, styleJ, styleS, ok, lastTick, used, retired, retireTick, builtTick; u8 pad[0x58]; } g_ownObj[OWN_PLAYERS];
+#define OWN_PLAYERS 32                  /* 2.2.1: was 24 */
+__declspec(align(128)) static struct { u8 objJ[BENCH_OBJ], objS[BENCH_OBJ]; u32 player, sig, styleJ, styleS, ok, lastTick, used, retired, retireTick, builtTick; ClothSnap snap[2]; u8 pad[0x18]; } g_ownObj[OWN_PLAYERS];
+typedef char own_obj_size_check[(sizeof(g_ownObj[0]) == 2 * BENCH_OBJ + 0x80) ? 1 : -1];
 static int g_ownObjN = 0;
 static volatile u32 st_ownSwaps = 0;
 static int bh_own_cloth(u32 inst)
@@ -530,19 +738,31 @@ static u32 own_expected_mesh(u32 player, int kind, u32 *style)
 static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fresh)
 {
     u32 bodyw = 0, sig, now = GetTickCount(), v, tb;
-    int i, n, rebuild = 0, revived = 0;
+    int i, n, rebuild = 0, revived = 0, unsafe = 0;
     read32(player + P_offBodyWord, &bodyw);
     sig = player_cfid((u8*)player) ^ (bodyw << 16) ^ (bodyw >> 16) ^ cloth_src_key(player, sj, ss);
-    if (!TryEnterCriticalSection(&g_clothLock)) { *fresh = 0; return cl_get(g_lastOwn, player, outJ, outS); }   /* 2.2 */
+    if (!TryEnterCriticalSection(&g_clothLock)) {                                                                 /* 2.2 */
+        *fresh = 0;
+        if (!cl_get(g_lastOwn, player, outJ, outS)) return 0;
+        i = (int)((*outJ - (u32)&g_ownObj[0]) / (u32)sizeof(g_ownObj[0]));                                        /* 2.2.1 */
+        if (i < 0 || i >= OWN_PLAYERS || *outJ != (u32)g_ownObj[i].objJ || *outS != (u32)g_ownObj[i].objS) return 0;
+        return cs_safe(&g_ownObj[i].snap[0], *outJ, 0, now) && cs_safe(&g_ownObj[i].snap[1], *outS, 1, now);
+    }
     for (i = 0; i < g_ownObjN; i++) if (!g_ownObj[i].retired && g_ownObj[i].used && g_ownObj[i].player == player) break;
     *fresh = 0;
     if (i < g_ownObjN && (g_ownObj[i].sig != sig || g_ownObj[i].styleJ != sj || g_ownObj[i].styleS != ss)) rebuild = 1;
-    if (rebuild && now - g_ownObj[i].builtTick < CLOTH_REBUILD_MS) rebuild = 0;   /* not again so soon */
+    /* 2.2.1: its cloth data is gone / replaced -> not used again (the node keeps the game's cloth until the rebuild) */
+    if (i < g_ownObjN && g_ownObj[i].ok &&
+        !(cs_safe(&g_ownObj[i].snap[0], (u32)g_ownObj[i].objJ, 0, now) && cs_safe(&g_ownObj[i].snap[1], (u32)g_ownObj[i].objS, 1, now))) {
+        unsafe = 1; rebuild = 1;
+    }
+    if (rebuild && now - g_ownObj[i].builtTick < (unsafe ? CLOTH_UNSAFE_MS : CLOTH_REBUILD_MS)) rebuild = 0;   /* not again so soon */
     if (i == g_ownObjN || rebuild) {   /* 2.1: built before for this player + uniform and only retired: use it again (no build) */
         int k;
         for (k = 0; k < g_ownObjN; k++)
             if (g_ownObj[k].retired && g_ownObj[k].used && g_ownObj[k].ok && g_ownObj[k].player == player && g_ownObj[k].sig == sig &&
-                g_ownObj[k].styleJ == sj && g_ownObj[k].styleS == ss) break;
+                g_ownObj[k].styleJ == sj && g_ownObj[k].styleS == ss &&
+                cs_safe(&g_ownObj[k].snap[0], (u32)g_ownObj[k].objJ, 0, now) && cs_safe(&g_ownObj[k].snap[1], (u32)g_ownObj[k].objS, 1, now)) break;   /* 2.2.1 */
         if (k < g_ownObjN) {
             if (rebuild) { g_ownObj[i].retired = 1; g_ownObj[i].retireTick = now; }
             i = k; g_ownObj[i].retired = 0; g_ownObj[i].lastTick = 0; revived = 1; rebuild = 0; st_clothRevived++; sl_after_build((void*)player, g_ownObj[i].objS);
@@ -555,7 +775,12 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
             st_clothDeferred++;
             if (!rebuild) { LeaveCriticalSection(&g_clothLock); return 0; }
         } else {
+            u32 run = 0;
             if (rebuild) { g_ownObj[i].retired = 1; g_ownObj[i].retireTick = now; }   /* the worker may still use it */
+            if (unsafe) {                                                               /* 2.2.1 */
+                run = cs_run(g_ownObj[i].snap, g_ownObj[i].builtTick);
+                g_ownObj[i].retireTick = now - (CLOTH_GRACE_MS - CLOTH_STALE_GRACE_MS);
+            }
             i = n;
             memset(&g_ownObj[i], 0, sizeof(g_ownObj[i]));
             g_ownObj[i].player = player; g_ownObj[i].sig = sig; g_ownObj[i].styleJ = sj; g_ownObj[i].styleS = ss;
@@ -564,6 +789,9 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
             sim_common(0, (void*)player, sj, g_ownObj[i].objJ);
             sim_common(1, (void*)player, ss, g_ownObj[i].objS);
             t_done(T_BUILD, tb); cloth_budget_used();
+            cs_take(&g_ownObj[i].snap[0], (u32)g_ownObj[i].objJ, 0, now);   /* 2.2.1: before Short Length (it only changes +78 / +8C / +90 of the instance) */
+            cs_take(&g_ownObj[i].snap[1], (u32)g_ownObj[i].objS, 1, now);
+            g_ownObj[i].snap[0].run = run;
             sl_after_build((void*)player, g_ownObj[i].objS);   /* Short Length knows this cloth */
             g_ownObj[i].ok = 1;
             *fresh = 1;
@@ -575,6 +803,7 @@ static int own_objects(u32 player, u32 sj, u32 ss, u32 *outJ, u32 *outS, int *fr
     g_ownObj[i].lastTick = now;
     *outJ = (u32)g_ownObj[i].objJ; *outS = (u32)g_ownObj[i].objS;
     v = g_ownObj[i].ok;
+    if (v && !(cs_safe(&g_ownObj[i].snap[0], *outJ, 0, now) && cs_safe(&g_ownObj[i].snap[1], *outS, 1, now))) v = 0;   /* 2.2.1 */
     if (v) cl_put(g_lastOwn, player, *outJ, *outS); else g_lastOwn[(player >> 4) & 63].player = 0;
     LeaveCriticalSection(&g_clothLock);
     return (int)v;

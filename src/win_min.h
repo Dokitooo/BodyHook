@@ -136,6 +136,7 @@ __declspec(dllimport) void    WINAPI LeaveCriticalSection(CRITICAL_SECTION*);
 __declspec(dllimport) BOOL    WINAPI TryEnterCriticalSection(CRITICAL_SECTION*);   /* 2.2 */
 __declspec(dllimport) BOOL    WINAPI FlushInstructionCache(HANDLE, LPCVOID, SIZE_T);
 __declspec(dllimport) HANDLE  WINAPI GetCurrentProcess(void);
+__declspec(dllimport) BOOL    WINAPI ReadProcessMemory(HANDLE, LPCVOID, LPVOID, SIZE_T, SIZE_T*);   /* 2.2.1 */
 __declspec(dllimport) DWORD   WINAPI GetCurrentThreadId(void);
 __declspec(dllimport) DWORD   WINAPI GetTickCount(void);
 __declspec(dllimport) HANDLE  WINAPI CreateMutexA(LPVOID, BOOL, LPCSTR);

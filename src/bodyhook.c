@@ -36,7 +36,7 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
-#define BODYHOOK_VERSION "2.2"
+#define BODYHOOK_VERSION "2.2.1"
 #include "slam_mod.h"   /* SLAM mod: slam_glue.c has DllMain + SlamModStart, this file starts in mod_start() */
 
 /* ------------------------------------------------------------------------------------------ */
@@ -425,6 +425,15 @@ static struct { volatile u32 gen, lo, hi, tick; } g_rq[RQ_CACHE];
 static volatile u32 g_rqHit = 0, g_rqGen = 0;
 static volatile u32 g_rqBusy[RQ_CACHE];
 static volatile u32 st_vq = 0;        /* 2.2: VirtualQuery calls (PERF line) */
+/* 2.2.1 (crash 1 s after start, BodyHook+15157): the start-up scans follow "call" targets found in the game's code
+ * and compare the bytes there. A target outside nba2k14.exe (code not unpacked yet = random bytes, another mod's hook)
+ * was asked about with readable() and read a moment later - by then that memory had been freed. A function of the
+ * game is always inside the game's image, which stays mapped: anything else is simply "not it". */
+static int in_image(u32 a, u32 n)
+{
+    if (!g_imgHi) return 1;                    /* image not measured yet: as before */
+    return a >= g_imgLo && a + n > a && a + n <= g_imgHi;
+}
 #define RQ_SLOT(a) ((((a) >> 16) ^ ((a) >> 24)) & (RQ_CACHE - 1))   /* the 64 KB block (Windows' allocation unit) */
 
 /* 2.2 (slow PCs): every check is O(1) - the last hit, then the slot of this 64 KB block. A region that is
@@ -2425,7 +2434,7 @@ int __cdecl SockBlue(const u32 *record, u8 *player, float *out)
 static int looks_like_asset_helper(u32 fn)
 {
     const u8 *p = (const u8*)fn;
-    if (!readable(p, 10)) return 0;
+    if (!in_image(fn, 10) || !readable(p, 10)) return 0;
     return p[0] == 0x33 && p[1] == 0xC0 && p[2] == 0x39 && p[3] == 0x41 && p[4] == 0x10 && p[5] == 0x74 &&
            p[7] == 0xFF && p[8] == 0x24 && p[9] == 0x95;
 }
@@ -2977,7 +2986,7 @@ static void install_cache_hooks(void)
 static int looks_like_cloth_getter(u32 fn, int *isShorts)
 {
     const u8 *p = (const u8*)fn;
-    if (!readable(p, 0x20)) return 0;
+    if (!in_image(fn, 0x20) || !readable(p, 0x20)) return 0;
     if (!(p[0] == 0x83 && p[1] == 0x3D && p[6] == 0x01 && p[7] == 0x7D && p[8] == 0x03 && p[9] == 0x33 &&
           p[10] == 0xC0 && p[11] == 0xC3 && p[12] == 0x8B && p[13] == 0x81 && p[14] == 0x08 && p[15] == 0x02))
         return 0;
@@ -3484,7 +3493,7 @@ static int match_at(const u8 *p)
 static int looks_like_resolver(u32 fn)
 {
     const u8 *p = (const u8*)fn;
-    if (!readable(p, 8)) return 0;
+    if (!in_image(fn, 8) || !readable(p, 8)) return 0;
     return p[0] == 0x56 && p[1] == 0x8B && p[2] == 0xF2 && p[3] == 0x8B && p[4] == 0x54 && p[5] == 0x24 && p[6] == 0x10;
 }
 
@@ -3878,6 +3887,14 @@ static DWORD WINAPI perf_thread(LPVOID unused)
             if (st_buildWaits != lw || st_clothRevived != lr) {
                 blog("PERF     own cloth: %u draw call(s) waited a frame for their build (one build per frame), %u object(s) reused instead of rebuilt (so far)", st_buildWaits, st_clothRevived);
                 lw = st_buildWaits; lr = st_clothRevived;
+            }
+        }
+        {   /* 2.2.1 */
+            static u32 lg;
+            if (st_gateStale != lg) {
+                blog("PERF     cloth safety: %u own cloth object(s) not used any more because the game replaced their cloth data (so far; why: gone %u, unloaded %u, changed %u/%u, misaligned %u)%s",
+                     st_gateStale, g_gateWhy[1], g_gateWhy[2], g_gateWhy[3], g_gateWhy[4], g_gateWhy[5], g_gateSkip ? " - some checks are off" : "");
+                lg = st_gateStale;
             }
         }
         {

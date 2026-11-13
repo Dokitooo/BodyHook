@@ -13,11 +13,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Alexicon"
       VALUE "FileDescription", "BodyHook - per-player bodies, uniforms and accessories for NBA 2K14 (SLAM mod)"
-      VALUE "FileVersion", "2.2"
+      VALUE "FileVersion", "2.2.1"
       VALUE "InternalName", "BodyHook"
       VALUE "OriginalFilename", "BodyHook.asi"
       VALUE "ProductName", "BodyHook"
-      VALUE "ProductVersion", "2.2"
+      VALUE "ProductVersion", "2.2.1"
       VALUE "LegalCopyright", "Copyright (c) 2026 Dokitooo"
       VALUE "Comments", "NBA 2K14 PC mod. Source: https://github.com/Dokitooo"
     END

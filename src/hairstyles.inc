@@ -393,7 +393,7 @@ static int hair_bytes(u32 a, const char *hex)   /* "56 8B F1 ??" style compare *
 {
     const u8 *p = (const u8*)a;
     int i = 0;
-    if (!readable(p, 32)) return 0;
+    if (!in_image(a, 32) || !readable(p, 32)) return 0;   /* 2.2.1: game code only */
     while (*hex) {
         int hi, lo2;
         if (*hex == ' ') { hex++; continue; }

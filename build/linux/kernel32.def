@@ -16,6 +16,7 @@ EXPORTS
     FindNextFileA@8
     FlushInstructionCache@12
     GetCurrentProcess@0
+    ReadProcessMemory@20
     GetCurrentProcessId@0
     GetCurrentThreadId@0
     GetFileAttributesA@4
