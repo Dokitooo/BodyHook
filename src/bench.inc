@@ -138,7 +138,8 @@ typedef struct { u32 mesh, hdr, topo, mask; volatile u32 tick, ok; u32 why, run;
 #define GATE_HDR 3
 #define GATE_TOPO 4
 #define GATE_ALIGN 5
-static volatile u32 g_gateSkip = 0, st_gateStale = 0;
+#define GATE_PTR 6     /* 2.2.2 */
+static volatile u32 g_gateSkip = 0, st_gateStale = 0, st_gatePtr = 0;   /* st_gatePtr: 2.2.2 */
 static u32 g_gateWhy[8], g_gateFresh[8];
 /* What the checks read lies in the cloth file's memory - the very memory that may be gone. It is read with
  * ReadProcessMemory (never faults; readable() can be up to 250 ms behind), once per ClothMesh and ~frame for all the
@@ -197,6 +198,11 @@ static int cs_check(const ClothSnap *s, u32 obj, int kind, u32 now)
     MeshPeek p;
     if (!inst) return 0;                                             /* static object: nothing is simulated */
     if (inst < obj || inst + 0xD0 > obj + BENCH_OBJ) return 0;       /* not laid out as expected: as before */
+    /* 2.2.2 (crash 00459F04, solver movaps [inst+78]+i*16 on a fresh own SHORTS object with +78 = 00003589): the
+     * rest shape / constraint pointers must be real addresses (no memory read, never switched off) */
+    { u32 r = *(const u32*)(inst + 0x78), a = *(const u32*)(inst + 0x8C), b = *(const u32*)(inst + 0x90);
+      if (((*(const u32*)(inst + 0xB8) & 0xFFF) && (r < 0x10000 || r >= 0xFFFF0000u || (r & 15))) || (a && (a < 0x10000 || (a & 3))) || (b && (b < 0x10000 || (b & 3))))
+          return GATE_PTR; }
     mesh = *(const u32*)(inst + 0xA8);
     mesh_peek(&p, inst, now);
     if (!p.valid) return (skip & (1u << GATE_GONE)) ? 0 : GATE_GONE;
@@ -232,6 +238,7 @@ static int cs_take(ClothSnap *s, u32 obj, int kind, u32 now)
     for (tries = 0; tries < 6; tries++) {
         why = cs_check(s, obj, kind, now);
         if (!why) { s->ok = 1; s->tick = now; return 1; }
+        if (why == GATE_PTR) { st_gatePtr++; return 0; }        /* 2.2.2: broken object, never a layout question */
         /* a NEW object that fails: this game's cloth data is not laid out as expected (or the game replaced the data
          * during the build - then it stays unused). The third time, that check is off for good. */
         if (++g_gateFresh[why] < 3) return 0;
@@ -559,7 +566,13 @@ static int edit_preview(u32 player)
 static int mesh_usable(u32 mesh)
 {
     if (!mesh) return 1;                                  /* no ClothMesh = static, always fine */
-    return readable((void*)mesh, 0xD0) && *(u32*)(mesh + 0xA4) == CLOTH_MAGIC;
+    if (!readable((void*)mesh, 0xD0) || *(u32*)(mesh + 0xA4) != CLOTH_MAGIC) return 0;
+    {   /* 2.2.2: a ClothMesh whose data pointers are not set up yet (still loading: +78 = 00003589, a file offset) */
+        u32 r = *(u32*)(mesh + 0x78), a = *(u32*)(mesh + 0x8C), b = *(u32*)(mesh + 0x90);
+        if ((*(u32*)(mesh + 0xB8) & 0xFFF) && (r < 0x10000 || r >= 0xFFFF0000u || (r & 15))) return 0;
+        if ((a && (a < 0x10000 || (a & 3))) || (b && (b < 0x10000 || (b & 3)))) return 0;
+    }
+    return 1;
 }
 static int own_fits(void)
 {

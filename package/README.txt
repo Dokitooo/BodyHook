@@ -1,7 +1,17 @@
 ===============================================================================
-  BodyHook 2.2.1  -  Per-player bodies, tattoos, uniforms and accessories
+  BodyHook 2.2.2  -  Per-player bodies, tattoos, uniforms and accessories
                    for NBA 2K14 PC
 ===============================================================================
+
+NEW IN 2.2.2  (crash fix - nothing removed, nothing looks different)
+------------
+  * CRASH WHEN PRACTICE / A GAME STARTS (cloth, nba2k14.exe+59F04): BodyHook
+    could build a player's own shorts cloth from cloth data the game was still
+    loading (not set up yet). Now such cloth data is never used: the player
+    keeps the game's cloth until the data is ready. The check compares 3
+    numbers BodyHook already has (no extra memory reads) - too small to measure.
+  * BodyHook.log: the "PERF cloth safety" line also counts these.
+  BodyHook.ini from 2.2.1 keeps working unchanged.
 
 NEW IN 2.2.1  (two crash fixes - nothing removed, nothing looks different)
 ------------

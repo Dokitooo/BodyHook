@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.2
+
+Crash fix. Nothing removed, nothing looks different.
+
+- **Crash when Practice or a game starts** (cloth, `nba2k14.exe+59F04`): BodyHook could build a player's own shorts cloth from cloth data the game was still loading (its pointers not set up yet). Such cloth data is never used now: the player keeps the game's cloth until the data is ready. The check compares 3 numbers BodyHook already has (no extra memory reads).
+- `BodyHook.log`: the "PERF cloth safety" line also counts these.
+- `BodyHook.ini` from 2.2.1 keeps working unchanged.
+
 ## 2.2.1
 
 Two crash fixes. Nothing removed, nothing looks different.

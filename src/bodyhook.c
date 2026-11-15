@@ -36,7 +36,7 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
-#define BODYHOOK_VERSION "2.2.1"
+#define BODYHOOK_VERSION "2.2.2"
 #include "slam_mod.h"   /* SLAM mod: slam_glue.c has DllMain + SlamModStart, this file starts in mod_start() */
 
 /* ------------------------------------------------------------------------------------------ */
@@ -3891,10 +3891,11 @@ static DWORD WINAPI perf_thread(LPVOID unused)
         }
         {   /* 2.2.1 */
             static u32 lg;
-            if (st_gateStale != lg) {
-                blog("PERF     cloth safety: %u own cloth object(s) not used any more because the game replaced their cloth data (so far; why: gone %u, unloaded %u, changed %u/%u, misaligned %u)%s",
-                     st_gateStale, g_gateWhy[1], g_gateWhy[2], g_gateWhy[3], g_gateWhy[4], g_gateWhy[5], g_gateSkip ? " - some checks are off" : "");
-                lg = st_gateStale;
+            static u32 lp;   /* 2.2.2 */
+            if (st_gateStale != lg || st_gatePtr != lp) {
+                blog("PERF     cloth safety: %u own cloth object(s) not used any more because the game replaced their cloth data (so far; why: gone %u, unloaded %u, changed %u/%u, misaligned %u, bad pointers %u); %u new object(s) with bad cloth pointers not used (game cloth kept)%s",
+                     st_gateStale, g_gateWhy[1], g_gateWhy[2], g_gateWhy[3], g_gateWhy[4], g_gateWhy[5], g_gateWhy[6], st_gatePtr, g_gateSkip ? " - some checks are off" : "");
+                lg = st_gateStale; lp = st_gatePtr;
             }
         }
         {
