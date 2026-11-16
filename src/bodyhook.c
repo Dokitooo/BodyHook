@@ -36,7 +36,7 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
-#define BODYHOOK_VERSION "2.2.2"
+#define BODYHOOK_VERSION "2.2.3"
 #include "slam_mod.h"   /* SLAM mod: slam_glue.c has DllMain + SlamModStart, this file starts in mod_start() */
 
 /* ------------------------------------------------------------------------------------------ */
@@ -444,7 +444,7 @@ static int rq_in(u32 i, u32 a, u32 end, u32 now)
     u32 g = g_rq[i].gen, lo, hi, tk;
     if (!g) return 0;
     lo = g_rq[i].lo; hi = g_rq[i].hi; tk = g_rq[i].tick;
-    return g_rq[i].gen == g && now - tk < 250 && a >= lo && end <= hi;
+    return g_rq[i].gen == g && (int)(tk - now) > 0 && a >= lo && end <= hi;   /* 2.2.3: tick = when it runs out */
 }
 static int readable(const void *p, u32 n)
 {
@@ -470,7 +470,10 @@ static int readable(const void *p, u32 n)
         if (!__sync_val_compare_and_swap(&g_rqBusy[k], 0, 1)) {   /* one writer per slot; busy -> just don't cache */
             u32 ng = __sync_add_and_fetch(&g_rqGen, 1);
             if (!ng) ng = __sync_add_and_fetch(&g_rqGen, 1);
-            g_rq[k].gen = 0; g_rq[k].lo = lo; g_rq[k].hi = hi; g_rq[k].tick = now; g_rq[k].gen = ng;
+            /* 2.2.3 (review: "SLOW draw guards 3-4 ms" every ~250 ms in Freestyle): every entry lived exactly 250 ms,
+             * so the entries made in one frame all ran out together and were asked again in one draw. Now each lives
+             * 250-500 ms (spread by slot and by its own count) - the re-checks are spread over many frames. */
+            g_rq[k].gen = 0; g_rq[k].lo = lo; g_rq[k].hi = hi; g_rq[k].tick = now + 250 + ((k * 37u + ng * 13u) & 0xFF); g_rq[k].gen = ng;
             g_rqHit = k;
             __sync_lock_release(&g_rqBusy[k]);
         }

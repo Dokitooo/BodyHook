@@ -1,7 +1,16 @@
 ===============================================================================
-  BodyHook 2.2.2  -  Per-player bodies, tattoos, uniforms and accessories
+  BodyHook 2.2.3  -  Per-player bodies, tattoos, uniforms and accessories
                    for NBA 2K14 PC
 ===============================================================================
+
+NEW IN 2.2.3  (smoother on slow PCs - nothing removed, nothing looks different)
+------------
+  * The short hitches every quarter second some logs showed ("SLOW draw guards
+    took 3 ms", seen in Freestyle): BodyHook's memory checks were all redone in
+    the same frame every 250 ms - most likely the cause. They are now spread over
+    many frames.
+  * File reads that are not a roster file pass straight through (no lock).
+  BodyHook.ini from 2.2.x keeps working unchanged.
 
 NEW IN 2.2.2  (crash fix - nothing removed, nothing looks different)
 ------------

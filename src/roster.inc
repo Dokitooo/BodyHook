@@ -211,6 +211,8 @@ BOOL WINAPI RosterReadFile(HANDLE h, LPVOID b, DWORD n, LPDWORD rd, LPVOID ov)
 {
     BOOL r = g_rosterRF(h, b, n, rd, ov); int i, fire = 0; char key[96];
     if (r && h && g_rosterOn) {
+        for (i = 0; i < 16 && g_rosterTr[i].h != h; i++) continue;   /* 2.2.3: no lock for files we don't follow */
+        if (i == 16) return r;
         rt_lock();
         for (i = 0; i < 16; i++) if (g_rosterTr[i].h == h) {
             g_rosterTr[i].bytes += rd ? *rd : n;

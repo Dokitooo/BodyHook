@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.3
+
+Smoother on slow PCs. Nothing removed, nothing looks different.
+
+- **Short hitches every quarter second** (some logs showed "SLOW draw guards took 3 ms", seen in Freestyle): BodyHook's memory checks were all redone in the same frame every 250 ms. Each check now lasts 250-500 ms, so the re-checks are spread over many frames.
+- **File reads that are not a roster file pass straight through** (no lock).
+- `BodyHook.ini` from 2.2.x keeps working unchanged.
+
 ## 2.2.2
 
 Crash fix. Nothing removed, nothing looks different.
